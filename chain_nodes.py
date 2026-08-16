@@ -100,7 +100,7 @@ H3_CONTEXT_LENGTHS = (
     141, 158, 175, 192, 209, 226, 243,
 )
 AUDIO_MODES = ("source_track", "generated_audio", "source_plus_timeline")
-CONTINUATION_MODES = ("guide", "masked_av")
+CONTINUATION_MODES = ("guide", "latent_guide", "masked_av")
 REFERENCE_AUDIO_TIMELINE_MODES = ("standalone", "source_timeline")
 
 PLAN_TYPE = "H3_CHAIN_PLAN"
@@ -1721,6 +1721,15 @@ def _normalize_plan(
             raise ValueError(
                 "Shot %d has unknown H3 continuation mode %r." %
                 (index, shot_continuation_mode))
+        if shot_context_length and shot_continuation_mode == "latent_guide":
+            if shot_context_length < 5:
+                raise ValueError(
+                    "H3 latent guide continuation requires context_length of "
+                    "at least 5 frames (shot %d)." % index)
+            if encode_mode != "video":
+                raise ValueError(
+                    "H3 latent guide continuation requires encode_mode=video "
+                    "(shot %d)." % index)
         if shot_context_length and shot_continuation_mode == "masked_av":
             if shot_context_length < 5:
                 raise ValueError(
@@ -4024,17 +4033,20 @@ class MiniMaxH3ChainPlan:
                 "continuation_mode": (list(CONTINUATION_MODES), {
                     "default": "guide",
                     "tooltip": "Inherited default for scenes without a "
-                               "per-scene continuation override. guide keeps "
-                               "the established Motion Context "
-                               "path: previous AV is supplied as fixed guide "
-                               "rows while the overlap is regenerated. "
+                               "per-scene continuation override. guide uses "
+                               "decoded frames re-encoded by the video VAE. "
+                               "latent_guide uses the previous sampler's raw "
+                               "video latent directly while regenerating the "
+                               "same overlap; generated clips therefore avoid "
+                               "the video VAE round trip. Imported scene-1 "
+                               "context falls back to the decoded-frame guide. "
                                "masked_av (experimental) VAE-encodes the "
                                "previous video tail into the current target "
                                "latent, copies its sampled audio tail, and "
                                "protects both with per-stream denoise masks. "
-                               "masked_av requires video/head, context >= 5, "
-                               "the Chain Context latent output wired to the "
-                               "sampler, and native or compatible H3 AV-mask "
+                               "latent_guide requires video mode and context "
+                               ">= 5; masked_av additionally requires head "
+                               "anchors and native or compatible H3 AV-mask "
                                "support."}),
             },
             "optional": {
@@ -4657,8 +4669,9 @@ class MiniMaxH3ChainContext:
                 "latent": ("LATENT", {
                     "tooltip": "The CURRENT scene's empty AV latent from the "
                                "stock H3 conditioning node. Chain Context "
-                               "passes it through in guide mode or returns a "
-                               "masked preserved-prefix copy in masked_av mode."}),
+                               "passes it through in guide/latent_guide mode "
+                               "or returns a masked preserved-prefix copy in "
+                               "masked_av mode."}),
             },
             "optional": {
                 "audio_vae": ("VAE", {
@@ -4681,16 +4694,18 @@ class MiniMaxH3ChainContext:
         "MiniMax H3 Contex Loop Trim.",
         "True when preceding video or generated audio is carried, including "
         "audio-only guide continuation; false for a fully independent scene.",
-        "Sampler-ready target latent. In guide mode this is the input latent "
-        "unchanged. In masked_av mode its preserved AV prefix and nested "
+        "Sampler-ready target latent. In guide and latent_guide modes this "
+        "is the input latent unchanged. In masked_av mode its preserved AV "
+        "prefix and nested "
         "denoise mask carry the previous scene into the current target. Wire "
         "this output to the sampler for both modes so Plan can switch safely.",
     )
     FUNCTION = "apply"
     CATEGORY = "conditioning/minimax/contex_loop"
-    DESCRIPTION = ("Apply each scene's inherited or overridden guide/masked "
-                   "AV continuation, including independent guide audio carry "
-                   "and scene 1 Existing Video Context.")
+    DESCRIPTION = ("Apply each scene's inherited or overridden guide, raw-"
+                   "latent guide, or masked AV continuation, including "
+                   "independent guide audio carry and scene 1 Existing Video "
+                   "Context.")
 
     def apply(self, state, conditioning, vae, latent, audio_vae=None):
         index = int(state["index"])
@@ -4701,14 +4716,18 @@ class MiniMaxH3ChainContext:
             shot, int(cfg["context_length"]))
         audio_context_length = _shot_audio_context_length(
             shot, int(cfg["audio_context_length"]), context_length)
-        continuation_mode = shot.get(
-            "continuation_mode", cfg.get("continuation_mode", "guide"))
-        external_first = index == 1 and bool(state.get("external_context"))
-        generated_audio_context = (
-            continuation_mode == "guide"
+        continuation_mode: str = str(shot.get(
+            "continuation_mode", cfg.get("continuation_mode", "guide")))
+        external_first: bool = (
+            index == 1 and bool(state.get("external_context")))
+        guide_mode: bool = continuation_mode in ("guide", "latent_guide")
+        generated_audio_context: bool = (
+            guide_mode
             and cfg["audio_mode"] in (
                 "generated_audio", "source_plus_timeline")
             and audio_context_length > 0)
+        raw_video_context: bool = (
+            continuation_mode == "latent_guide" and context_length > 0)
         has_context = context_length > 0 or generated_audio_context
         if not has_context or (index == 1 and not external_first):
             if any(
@@ -4754,13 +4773,23 @@ class MiniMaxH3ChainContext:
                                 if external_first else None),
             )
             return (out_conditioning, trim, True, out_latent)
-        previous_latent = (state.get("previous_latent")
-                           if generated_audio_context else None)
-        previous_audio = (state.get("previous_audio")
-                          if generated_audio_context and external_first else None)
+        previous_latent: Any = (
+            state.get("previous_latent")
+            if generated_audio_context or raw_video_context else None)
+        previous_audio: Any = (
+            state.get("previous_audio")
+            if generated_audio_context and external_first else None)
         if (generated_audio_context and previous_latent is None
                 and previous_audio is None and not external_first):
             raise ValueError("H3 chain continuation has no previous AV latent.")
+        if raw_video_context and previous_latent is None:
+            if not external_first:
+                raise ValueError(
+                    "H3 latent guide continuation has no previous sampled AV "
+                    "latent.")
+            _LOG.info(
+                "H3 latent guide scene 1 has imported context but no native "
+                "sampled latent; using the decoded-frame VAE fallback.")
         out, trim = MiniMaxH3MotionContext().apply(
             conditioning=conditioning,
             vae=vae,
@@ -4773,9 +4802,12 @@ class MiniMaxH3ChainContext:
             audio_context_length=(audio_context_length
                                   if generated_audio_context else 0),
             audio_mode="timeline",
-            context_latent=previous_latent,
+            context_latent=(previous_latent
+                            if generated_audio_context else None),
             audio_vae=audio_vae,
             context_audio=previous_audio,
+            context_video_latent=(previous_latent
+                                  if raw_video_context else None),
         )
         return (out, trim, True, latent)
 
