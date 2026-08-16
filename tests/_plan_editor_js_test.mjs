@@ -27,7 +27,7 @@ import {
 } from "../web/h3_chain_plan_core.mjs";
 
 assert.equal(AUTO_SCENE_COLORS.length, 12);
-assert.deepEqual(CONTINUATION_MODES, ["guide", "masked_av"]);
+assert.deepEqual(CONTINUATION_MODES, ["guide", "latent_guide", "masked_av"]);
 assert.equal(H3_CONTEXT_LENGTHS.at(-1), 243);
 assert.equal(new Set(AUTO_SCENE_COLORS).size, AUTO_SCENE_COLORS.length);
 assert.equal(automaticSceneColor(0), AUTO_SCENE_COLORS[0]);
@@ -72,6 +72,10 @@ assert.equal(sceneContinuationMode({}, "guide"), "guide");
 assert.equal(
     sceneContinuationMode({continuation_mode: "masked_av"}, "guide"),
     "masked_av",
+);
+assert.equal(
+    sceneContinuationMode({continuation_mode: "latent_guide"}, "guide"),
+    "latent_guide",
 );
 assert.throws(
     () => sceneContinuationMode({continuation_mode: "unknown"}, "guide"),
@@ -306,6 +310,7 @@ assert.match(editorSource, /New random/);
 assert.match(editorSource, /Use derived/);
 assert.match(editorSource, /Continuation into scene/);
 assert.match(editorSource, /Guide · new shot/);
+assert.match(editorSource, /Latent Guide · raw latent/);
 assert.match(editorSource, /Masked AV · same shot/);
 assert.match(editorSource, /Video context/);
 assert.match(editorSource, /Audio context/);

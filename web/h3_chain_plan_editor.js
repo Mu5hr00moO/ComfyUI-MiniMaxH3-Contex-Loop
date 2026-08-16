@@ -876,6 +876,7 @@ function mountEditor(node) {
         for (const [value, label] of [
             ["", `Plan default · ${planContinuationMode}`],
             ["guide", "Guide · new shot"],
+            ["latent_guide", "Latent Guide · raw latent"],
             ["masked_av", "Masked AV · same shot"],
         ]) {
             const option = element("option", "", label);
@@ -885,8 +886,8 @@ function mountEditor(node) {
         continuation.value = Object.hasOwn(shot, "continuation_mode")
             ? shot.continuation_mode : "";
         continuation.title = index === 0
-            ? "Continuation into this scene. Scene 1 uses it only when Existing Video Context supplies a predecessor. Guide allows a new shot; Masked AV preserves the same shot exactly."
-            : "Continuation from the preceding scene into this one. Guide is flexible for a new shot; Masked AV preserves an exact prefix for the same shot.";
+            ? "Continuation into this scene. Scene 1 uses it only when Existing Video Context supplies a predecessor. Guide uses VAE-encoded frames; Latent Guide uses the native sampled latent; Masked AV preserves the same shot exactly."
+            : "Continuation from the preceding scene into this one. Guide uses VAE-encoded frames; Latent Guide uses the native sampled latent; Masked AV preserves an exact prefix for the same shot.";
         continuation.addEventListener("change", () => {
             if (continuation.value) {
                 shot.continuation_mode = continuation.value;
