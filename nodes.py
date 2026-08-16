@@ -424,7 +424,8 @@ class MiniMaxH3MotionContext:
     def apply(self, conditioning, vae, latent, context_frames, context_length,
               encode_mode, anchor_mode, crop, audio_context_length=22,
               audio_mode="timeline", context_latent=None, audio_vae=None,
-              context_audio=None):
+              context_audio=None,
+              context_video_latent: dict[str, object] | None = None):
         guide_api = _activate_inline_patches()
         native_guides = guide_api == "native"
 
@@ -467,13 +468,32 @@ class MiniMaxH3MotionContext:
         blocks = []
         offsets = []
         span = 0
-        if n > 0:
-            # the LAST n frames of the incoming clip become the pinned run
+        tail: torch.Tensor | None = None
+        if n > 0 and (
+                encode_mode == "frames" or context_video_latent is None):
+            # Decoded frames remain the legacy guide source and the per-frame
+            # source. Raw-latent guide mode skips this resize path entirely.
             tail = _resize(context_frames[available - n:], width, height, crop)
 
         if n > 0 and encode_mode == "video":
-            # one call; the VAE reads the batch axis as time and compresses
-            enc = vae.encode(tail)
+            if context_video_latent is not None:
+                enc: torch.Tensor = _video_tail_from_latent(
+                    context_video_latent, n)
+                if tuple(enc.shape[3:]) != tuple(video.shape[3:]):
+                    raise ValueError(
+                        "h3_motion_context: raw video context latent has "
+                        "spatial shape %s; target latent expects %s."
+                        % (tuple(enc.shape[3:]), tuple(video.shape[3:])))
+                _LOG.info(
+                    "h3_motion_context: video context source=native sampled "
+                    "latent, %d frames -> %d latent steps",
+                    n, int(enc.shape[2]))
+            else:
+                # Legacy guide path: encode the decoded tail with the video VAE.
+                if tail is None:
+                    raise RuntimeError(
+                        "h3_motion_context: decoded video tail was not prepared.")
+                enc = vae.encode(tail)
             if getattr(enc, "ndim", 0) != 5:
                 raise ValueError(
                     "h3_motion_context: video-mode encode returned shape %s, "
@@ -502,6 +522,9 @@ class MiniMaxH3MotionContext:
                 blocks = [enc[:, :, k:k + 1] for k in range(steps)]
             span = covered
         elif n > 0:
+            if tail is None:
+                raise RuntimeError(
+                    "h3_motion_context: decoded frame tail was not prepared.")
             for i in range(n):
                 blocks.append(vae.encode(tail[i:i + 1]))
                 offsets.append(i)
