@@ -212,7 +212,7 @@ def main() -> None:
         chain.MiniMaxH3MotionContext = real_motion_context
 
     assert guide_result[:3] == ("guide", 5, True)
-    assert captured_guide["context_video_latent"] is None
+    assert "context_video_latent" not in captured_guide
 
     expect_value_error(
         lambda: chain.MiniMaxH3ChainContext().apply(

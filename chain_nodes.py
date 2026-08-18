@@ -4833,7 +4833,6 @@ class MiniMaxH3ChainContext:
                             if generated_audio_context else None),
             audio_vae=audio_vae,
             context_audio=previous_audio,
-            context_video_latent=None,
         )
         return (out, trim, True, latent)
 

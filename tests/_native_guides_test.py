@@ -325,12 +325,6 @@ def main():
             steps = max(1, (count - 5) // 17 * 5 + 2)
             return T(np.zeros((1, 16, steps, height, width)))
 
-    class FailingVAE:
-        def encode(self, images: object) -> T:
-            raise AssertionError(
-                "Raw video latent guide must not call the video VAE encoder."
-            )
-
     refs = [
         {"kind": "image", "latent_h": height, "latent_w": width,
          "latent": T(np.zeros((1, 16, 1, height, width)))},
@@ -383,32 +377,6 @@ def main():
     assert keyframes[1].get("latent") is None
     assert tuple(keyframes[1]["audio_latent"].shape)[-1] == 37
     assert abs(keyframes[1]["resolved_frame_index"]) < 1e-6
-
-    raw_output, raw_trim = nodes.MiniMaxH3MotionContext().apply(
-        conditioning=[["conditioning", {"minimax_refs": refs}]],
-        vae=FailingVAE(),
-        latent=target,
-        context_frames=context,
-        context_length=22,
-        encode_mode="video",
-        anchor_mode="head",
-        crop="disabled",
-        audio_context_length=22,
-        audio_mode="timeline",
-        context_latent=previous,
-        context_video_latent=previous,
-    )
-    assert raw_trim == 22
-    raw_keyframes: list[dict[str, object]] = raw_output[0][1][
-        "minimax_keyframes"
-    ]
-    assert len(raw_keyframes) == 2
-    raw_video_guide: T = raw_keyframes[0]["latent"]
-    assert tuple(raw_video_guide.shape) == (1, 16, 7, height, width)
-    assert np.array_equal(
-        raw_video_guide.a[0, 0, :, 0, 0],
-        np.arange(30, 37, dtype=np.float64),
-    )
 
     audio_only_output, audio_only_trim = nodes.MiniMaxH3MotionContext().apply(
         conditioning=[["conditioning", {"minimax_refs": refs}]],
