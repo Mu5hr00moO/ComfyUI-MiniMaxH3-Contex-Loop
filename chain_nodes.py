@@ -4731,16 +4731,23 @@ class MiniMaxH3ChainContext:
             and audio_context_length > 0)
         has_context = context_length > 0 or generated_audio_context
         if not has_context or (index == 1 and not external_first):
-            if any(
-                    candidate.get(
-                        "continuation_mode",
-                        cfg.get("continuation_mode", "guide")) in (
-                            "latent_guide", "masked_av")
-                    and _shot_context_length(
-                        candidate, int(cfg["context_length"])) > 0
-                    for candidate in plan["shots"]):
-                # Fail before spending minutes on scene 1 if this ComfyUI
-                # cannot run a masked continuation required by a later scene.
+            required_mask_modes: set[str] = {
+                str(candidate.get(
+                    "continuation_mode",
+                    cfg.get("continuation_mode", "guide")
+                ))
+                for candidate in plan["shots"]
+                if _shot_context_length(
+                    candidate, int(cfg["context_length"])
+                ) > 0
+            }
+            if "latent_guide" in required_mask_modes:
+                from .latent_guide_context import (
+                    _require_latent_guide_mask_support,
+                )
+                _require_latent_guide_mask_support()
+            if "masked_av" in required_mask_modes:
+                # Keep the upstream masked_av capability gate unchanged.
                 from .masked_context import _require_h3_mask_support
                 _require_h3_mask_support()
             if continuation_mode in ("latent_guide", "masked_av"):

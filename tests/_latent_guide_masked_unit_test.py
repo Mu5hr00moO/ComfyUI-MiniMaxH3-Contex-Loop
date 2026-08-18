@@ -111,7 +111,7 @@ def main() -> None:
     nodes = _load("nodes")
     _load("masked_context")
     custom = _load("latent_guide_context")
-    custom._require_h3_mask_support = lambda: None
+    custom._require_latent_guide_mask_support = lambda: None
 
     target_frames: int = 192
     target_video_steps: int = 57

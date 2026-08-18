@@ -15,7 +15,6 @@ import torch
 from .masked_context import (
     _drop_prefix_guides,
     _existing_mask_streams,
-    _require_h3_mask_support,
     _validate_target_streams,
 )
 from .nodes import (
@@ -30,6 +29,20 @@ from .nodes import (
 _LOG = logging.getLogger("minimax_h3_context_loop.latent_guide")
 
 
+def _require_latent_guide_mask_support() -> None:
+    """Enable H3 AV-mask support without requiring the native guide API."""
+    from .h3_mask_compat import ensure_h3_mask_compat, is_ready
+    from .h3_mask_payload_compat import ensure_av_mask_payload_compat
+
+    ensure_h3_mask_compat()
+    ensure_av_mask_payload_compat()
+    if not is_ready():
+        raise RuntimeError(
+            "h3_latent_guide: H3 per-stream AV-mask support could not be "
+            "enabled. Check the ComfyUI console capability report."
+        )
+
+
 def apply_latent_guide_prefix(
     conditioning: Any,
     latent: dict[str, Any],
@@ -37,7 +50,7 @@ def apply_latent_guide_prefix(
     context_length: int,
 ) -> tuple[Any, dict[str, Any], int]:
     """Preserve a raw sampled AV tail at the head of the next target latent."""
-    _require_h3_mask_support()
+    _require_latent_guide_mask_support()
     target_video, target_audio, target_frames = _validate_target_streams(latent)
 
     frames: int = int(context_length)
