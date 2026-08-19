@@ -6049,6 +6049,66 @@ def _audio_with_prelude(
         "sample_rate": sample_rate,
     }
 
+def _generated_audio_with_prelude(
+    audio: dict[str, Any],
+    extension_frames: int,
+    prelude: dict[str, Any],
+    manifest: dict[str, Any],
+) -> dict[str, Any]:
+    """Let scene 1 own the generated-audio overlap with a saved prelude."""
+    combined = _audio_with_prelude(audio, extension_frames, prelude)
+    segments = manifest.get("segments") or []
+    if not segments:
+        return combined
+    first = segments[0]
+    delivered_frames = int(first["delivered_frames"])
+    raw_frames = int(first.get("raw_frames", delivered_frames))
+    overlap_frames = raw_frames - delivered_frames
+    if overlap_frames <= 0:
+        return combined
+    prelude_frames = int(prelude["frame_count"])
+    overlap_start_frame = prelude_frames - overlap_frames
+    if overlap_start_frame < 0:
+        raise ValueError(
+            "H3 chain clip 1 audio overlap is %d frames, but the prelude has "
+            "only %d frames." % (overlap_frames, prelude_frames))
+    if _st_load is None:
+        raise RuntimeError(
+            "Generated-audio prelude ownership requires safetensors.")
+    checkpoint = _absolute_output_path(first["checkpoint"])
+    tensors = _st_load(checkpoint)
+    overlap_waveform = tensors.get("overlap_audio")
+    if overlap_waveform is None:
+        return combined
+    waveform, sample_rate = _audio_waveform_3d(
+        combined, "H3 generated audio with prelude")
+    current_rate = int(first.get("sample_rate", 0))
+    if current_rate != sample_rate:
+        raise ValueError(
+            "H3 chain clip 1 overlap audio sample rate %d does not match "
+            "assembled generated audio sample rate %d." %
+            (current_rate, sample_rate))
+    channels = int(waveform.shape[1])
+    overlap_start_sample = int(round(
+        overlap_start_frame / float(FPS) * sample_rate))
+    first_end_sample = int(round(
+        (prelude_frames + delivered_frames) / float(FPS) * sample_rate))
+    ownership_samples = first_end_sample - overlap_start_sample
+    normalized_overlap = _resample_audio_exact(
+        {"waveform": overlap_waveform, "sample_rate": sample_rate},
+        sample_rate, ownership_samples, channels,
+        "H3 chain clip 1 prelude overlap audio")["waveform"]
+    merged = torch.cat((
+        waveform[..., :overlap_start_sample],
+        normalized_overlap,
+        waveform[..., first_end_sample:],
+    ), dim=-1)
+    _LOG.info(
+        "H3 generated audio: clip 1 owns %d-frame prelude overlap from "
+        "absolute frame %d.",
+        overlap_frames, overlap_start_frame)
+    return {"waveform": merged, "sample_rate": sample_rate}
+
 
 def _validate_manifest(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     segments = manifest.get("segments") or []
@@ -6950,11 +7010,15 @@ class MiniMaxH3ChainAssemble:
         prelude_frames = int(prelude["frame_count"]) if prelude is not None else 0
         total_output_frames = prelude_frames + extension_frames
         if audio is not None and prelude is not None:
-            audio = _audio_with_prelude(audio, extension_frames, prelude)
+            if selected == "generated":
+                audio = _generated_audio_with_prelude(
+                    audio, extension_frames, prelude, manifest)
+            else:
+                audio = _audio_with_prelude(audio, extension_frames, prelude)
         generated_sidecar_audio = generated_track if preserve_generated else None
         if generated_sidecar_audio is not None and prelude is not None:
-            generated_sidecar_audio = _audio_with_prelude(
-                generated_sidecar_audio, extension_frames, prelude)
+            generated_sidecar_audio = _generated_audio_with_prelude(
+                generated_sidecar_audio, extension_frames, prelude, manifest)
 
         run_name = _safe_name(manifest.get("run_name"), "h3_chain")
         run_dir = os.path.join(_output_root(), "h3_chains", run_name)
