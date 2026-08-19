@@ -3148,6 +3148,11 @@ class MiniMaxH3TaggedPictureReference:
 
     RETURN_TYPES = (TAGGED_REFERENCE_TYPE, "STRING", "STRING")
     RETURN_NAMES = ("references", "reference_fingerprint", "status")
+    OUTPUT_TOOLTIPS = (
+        "Tagged picture-reference chain including this entry.",
+        "Stable fingerprint for the complete tagged-reference chain.",
+        "Human-readable summary of the registered picture reference.",
+    )
     FUNCTION = "add"
     CATEGORY = "conditioning/minimax/contex_loop/references/prompt_driven"
     DESCRIPTION = ("Register one picture under a stable @tag. No numeric "
@@ -3218,6 +3223,11 @@ class MiniMaxH3TaggedVideoReference:
 
     RETURN_TYPES = (TAGGED_REFERENCE_TYPE, "STRING", "STRING")
     RETURN_NAMES = ("references", "reference_fingerprint", "status")
+    OUTPUT_TOOLTIPS = (
+        "Tagged video-reference chain including this entry.",
+        "Stable fingerprint for the complete tagged-reference chain.",
+        "Human-readable summary of the registered video reference.",
+    )
     FUNCTION = "add"
     CATEGORY = "conditioning/minimax/contex_loop/references/prompt_driven"
     DESCRIPTION = ("Register one 24 fps video and optional paired soundtrack "
@@ -3291,6 +3301,11 @@ class MiniMaxH3TaggedAudioReference:
 
     RETURN_TYPES = (TAGGED_REFERENCE_TYPE, "STRING", "STRING")
     RETURN_NAMES = ("references", "reference_fingerprint", "status")
+    OUTPUT_TOOLTIPS = (
+        "Tagged audio-reference chain including this entry.",
+        "Stable fingerprint for the complete tagged-reference chain.",
+        "Human-readable summary of the registered audio reference.",
+    )
     FUNCTION = "add"
     CATEGORY = "conditioning/minimax/contex_loop/references/prompt_driven"
     DESCRIPTION = ("Register audio under a stable @tag. It can remain a fixed "

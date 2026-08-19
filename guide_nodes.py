@@ -100,7 +100,12 @@ class MiniMaxH3GuideImage:
     def INPUT_TYPES(cls) -> dict[str, Any]:
         return {
             "required": {
-                "image": ("IMAGE",),
+                "image": (
+                    "IMAGE",
+                    {
+                        "tooltip": "Image used as a MiniMax H3 guide anchor.",
+                    },
+                ),
                 "frame_index": (
                     "INT",
                     {
@@ -116,12 +121,22 @@ class MiniMaxH3GuideImage:
                 ),
             },
             "optional": {
-                "guide_images": (GUIDE_IMAGES_TYPE,),
+                "guide_images": (
+                    GUIDE_IMAGES_TYPE,
+                    {
+                        "tooltip": (
+                            "Optional upstream guide-image chain to append to."
+                        ),
+                    },
+                ),
             },
         }
 
     RETURN_TYPES: tuple[str, ...] = (GUIDE_IMAGES_TYPE,)
     RETURN_NAMES: tuple[str, ...] = ("guide_images",)
+    OUTPUT_TOOLTIPS: tuple[str, ...] = (
+        "Guide-image chain including this image and upstream anchors.",
+    )
     FUNCTION: str = "build"
     CATEGORY: str = "model/conditioning/minimax"
     DESCRIPTION: str = (
@@ -150,13 +165,28 @@ class MiniMaxH3GuideImagesToVideo:
     def INPUT_TYPES(cls) -> dict[str, Any]:
         return {
             "required": {
-                "clip": ("CLIP",),
-                "vae": ("VAE",),
+                "clip": (
+                    "CLIP",
+                    {
+                        "tooltip": "MiniMax H3 text/vision encoder.",
+                    },
+                ),
+                "vae": (
+                    "VAE",
+                    {
+                        "tooltip": (
+                            "MiniMax H3 video VAE used to encode guide images."
+                        ),
+                    },
+                ),
                 "prompt": (
                     "STRING",
                     {
                         "multiline": True,
                         "dynamicPrompts": True,
+                        "tooltip": (
+                            "Prompt encoded together with the ordered guide images."
+                        ),
                     },
                 ),
                 "width": (
@@ -166,6 +196,7 @@ class MiniMaxH3GuideImagesToVideo:
                         "min": 32,
                         "max": comfy_nodes.MAX_RESOLUTION,
                         "step": 32,
+                        "tooltip": "Target video width in pixels.",
                     },
                 ),
                 "height": (
@@ -175,6 +206,7 @@ class MiniMaxH3GuideImagesToVideo:
                         "min": 32,
                         "max": comfy_nodes.MAX_RESOLUTION,
                         "step": 32,
+                        "tooltip": "Target video height in pixels.",
                     },
                 ),
                 "length": (
@@ -192,12 +224,23 @@ class MiniMaxH3GuideImagesToVideo:
                 ),
             },
             "optional": {
-                "guide_images": (GUIDE_IMAGES_TYPE,),
+                "guide_images": (
+                    GUIDE_IMAGES_TYPE,
+                    {
+                        "tooltip": (
+                            "Guide-image chain produced by MiniMax H3 Guide Image nodes."
+                        ),
+                    },
+                ),
             },
         }
 
     RETURN_TYPES: tuple[str, ...] = ("CONDITIONING", "LATENT")
     RETURN_NAMES: tuple[str, ...] = ("positive", "latent")
+    OUTPUT_TOOLTIPS: tuple[str, ...] = (
+        "Positive H3 conditioning containing the resolved guide anchors.",
+        "Empty aligned MiniMax H3 AV latent for the requested duration.",
+    )
     FUNCTION: str = "execute"
     CATEGORY: str = "model/conditioning/minimax"
     DESCRIPTION: str = (
