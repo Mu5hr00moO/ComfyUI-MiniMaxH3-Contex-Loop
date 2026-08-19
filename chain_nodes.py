@@ -100,7 +100,7 @@ H3_CONTEXT_LENGTHS = (
     141, 158, 175, 192, 209, 226, 243,
 )
 AUDIO_MODES = ("source_track", "generated_audio", "source_plus_timeline")
-CONTINUATION_MODES = ("guide", "masked_av")
+CONTINUATION_MODES = ("guide", "latent_guide", "masked_av")
 REFERENCE_AUDIO_TIMELINE_MODES = ("standalone", "source_timeline")
 
 PLAN_TYPE = "H3_CHAIN_PLAN"
@@ -1721,6 +1721,20 @@ def _normalize_plan(
             raise ValueError(
                 "Shot %d has unknown H3 continuation mode %r." %
                 (index, shot_continuation_mode))
+        if shot_context_length and shot_continuation_mode == "latent_guide":
+            if shot_context_length < 5:
+                raise ValueError(
+                    "H3 latent guide continuation requires context_length of "
+                    "at least 5 frames (shot %d)." % index)
+            if encode_mode != "video":
+                raise ValueError(
+                    "H3 latent guide continuation requires encode_mode=video "
+                    "(shot %d)." % index)
+            if anchor_mode != "head":
+                raise ValueError(
+                    "H3 latent guide continuation requires anchor_mode=head "
+                    "because it preserves a real target-latent prefix that "
+                    "Loop Trim must remove (shot %d)." % index)
         if shot_context_length and shot_continuation_mode == "masked_av":
             if shot_context_length < 5:
                 raise ValueError(
@@ -3134,6 +3148,11 @@ class MiniMaxH3TaggedPictureReference:
 
     RETURN_TYPES = (TAGGED_REFERENCE_TYPE, "STRING", "STRING")
     RETURN_NAMES = ("references", "reference_fingerprint", "status")
+    OUTPUT_TOOLTIPS = (
+        "Tagged picture-reference chain including this entry.",
+        "Stable fingerprint for the complete tagged-reference chain.",
+        "Human-readable summary of the registered picture reference.",
+    )
     FUNCTION = "add"
     CATEGORY = "conditioning/minimax/contex_loop/references/prompt_driven"
     DESCRIPTION = ("Register one picture under a stable @tag. No numeric "
@@ -3204,6 +3223,11 @@ class MiniMaxH3TaggedVideoReference:
 
     RETURN_TYPES = (TAGGED_REFERENCE_TYPE, "STRING", "STRING")
     RETURN_NAMES = ("references", "reference_fingerprint", "status")
+    OUTPUT_TOOLTIPS = (
+        "Tagged video-reference chain including this entry.",
+        "Stable fingerprint for the complete tagged-reference chain.",
+        "Human-readable summary of the registered video reference.",
+    )
     FUNCTION = "add"
     CATEGORY = "conditioning/minimax/contex_loop/references/prompt_driven"
     DESCRIPTION = ("Register one 24 fps video and optional paired soundtrack "
@@ -3277,6 +3301,11 @@ class MiniMaxH3TaggedAudioReference:
 
     RETURN_TYPES = (TAGGED_REFERENCE_TYPE, "STRING", "STRING")
     RETURN_NAMES = ("references", "reference_fingerprint", "status")
+    OUTPUT_TOOLTIPS = (
+        "Tagged audio-reference chain including this entry.",
+        "Stable fingerprint for the complete tagged-reference chain.",
+        "Human-readable summary of the registered audio reference.",
+    )
     FUNCTION = "add"
     CATEGORY = "conditioning/minimax/contex_loop/references/prompt_driven"
     DESCRIPTION = ("Register audio under a stable @tag. It can remain a fixed "
@@ -3746,7 +3775,7 @@ class MiniMaxH3ChainExternalVideo:
                 "H3 existing-video source audio")
             first_continuation_mode = plan["shots"][0].get(
                 "continuation_mode", cfg.get("continuation_mode", "guide"))
-            if first_continuation_mode == "masked_av":
+            if first_continuation_mode in ("masked_av", "latent_guide"):
                 # A clean target AV prefix is one physical interval. Unlike
                 # guide mode, masked continuation cannot use an independently
                 # sized audio-reference window.
@@ -4024,17 +4053,20 @@ class MiniMaxH3ChainPlan:
                 "continuation_mode": (list(CONTINUATION_MODES), {
                     "default": "guide",
                     "tooltip": "Inherited default for scenes without a "
-                               "per-scene continuation override. guide keeps "
-                               "the established Motion Context "
-                               "path: previous AV is supplied as fixed guide "
-                               "rows while the overlap is regenerated. "
+                               "per-scene continuation override. guide uses "
+                               "decoded frames re-encoded by the video VAE. "
+                               "latent_guide uses the previous sampler's raw "
+                               "video latent directly while regenerating the "
+                               "same overlap; generated clips therefore avoid "
+                               "the video VAE round trip. Imported scene-1 "
+                               "context falls back to the decoded-frame guide. "
                                "masked_av (experimental) VAE-encodes the "
                                "previous video tail into the current target "
                                "latent, copies its sampled audio tail, and "
                                "protects both with per-stream denoise masks. "
-                               "masked_av requires video/head, context >= 5, "
-                               "the Chain Context latent output wired to the "
-                               "sampler, and native or compatible H3 AV-mask "
+                               "latent_guide requires video mode and context "
+                               ">= 5; masked_av additionally requires head "
+                               "anchors and native or compatible H3 AV-mask "
                                "support."}),
             },
             "optional": {
@@ -4658,7 +4690,8 @@ class MiniMaxH3ChainContext:
                     "tooltip": "The CURRENT scene's empty AV latent from the "
                                "stock H3 conditioning node. Chain Context "
                                "passes it through in guide mode or returns a "
-                               "masked preserved-prefix copy in masked_av mode."}),
+                               "masked preserved-prefix copy in latent_guide "
+                               "and masked_av modes."}),
             },
             "optional": {
                 "audio_vae": ("VAE", {
@@ -4681,16 +4714,16 @@ class MiniMaxH3ChainContext:
         "MiniMax H3 Contex Loop Trim.",
         "True when preceding video or generated audio is carried, including "
         "audio-only guide continuation; false for a fully independent scene.",
-        "Sampler-ready target latent. In guide mode this is the input latent "
-        "unchanged. In masked_av mode its preserved AV prefix and nested "
-        "denoise mask carry the previous scene into the current target. Wire "
-        "this output to the sampler for both modes so Plan can switch safely.",
+        "Sampler-ready target latent. Guide mode passes the input latent "
+        "through unchanged. latent_guide and masked_av return a preserved AV "
+        "prefix plus nested denoise mask. Wire this output to the sampler so "
+        "Plan can switch modes safely.",
     )
     FUNCTION = "apply"
     CATEGORY = "conditioning/minimax/contex_loop"
-    DESCRIPTION = ("Apply each scene's inherited or overridden guide/masked "
-                   "AV continuation, including independent guide audio carry "
-                   "and scene 1 Existing Video Context.")
+    DESCRIPTION = ("Apply each scene's inherited or overridden guide, custom "
+                   "raw masked-AV latent guide, or upstream masked AV "
+                   "continuation, including scene 1 Existing Video Context.")
 
     def apply(self, state, conditioning, vae, latent, audio_vae=None):
         index = int(state["index"])
@@ -4701,29 +4734,38 @@ class MiniMaxH3ChainContext:
             shot, int(cfg["context_length"]))
         audio_context_length = _shot_audio_context_length(
             shot, int(cfg["audio_context_length"]), context_length)
-        continuation_mode = shot.get(
-            "continuation_mode", cfg.get("continuation_mode", "guide"))
-        external_first = index == 1 and bool(state.get("external_context"))
-        generated_audio_context = (
-            continuation_mode == "guide"
+        continuation_mode: str = str(shot.get(
+            "continuation_mode", cfg.get("continuation_mode", "guide")))
+        external_first: bool = (
+            index == 1 and bool(state.get("external_context")))
+        guide_mode: bool = continuation_mode == "guide"
+        generated_audio_context: bool = (
+            guide_mode
             and cfg["audio_mode"] in (
                 "generated_audio", "source_plus_timeline")
             and audio_context_length > 0)
         has_context = context_length > 0 or generated_audio_context
         if not has_context or (index == 1 and not external_first):
-            if any(
-                    candidate.get(
-                        "continuation_mode",
-                        cfg.get("continuation_mode", "guide")) == "masked_av"
-                    and _shot_context_length(
-                        candidate, int(cfg["context_length"])) > 0
-                    for candidate in plan["shots"]):
-                # Fail before spending minutes on scene 1 if this ComfyUI
-                # cannot run a masked continuation required by a later scene.
+            required_mask_modes: set[str] = {
+                str(candidate.get(
+                    "continuation_mode",
+                    cfg.get("continuation_mode", "guide")
+                ))
+                for candidate in plan["shots"]
+                if _shot_context_length(
+                    candidate, int(cfg["context_length"])
+                ) > 0
+            }
+            if "latent_guide" in required_mask_modes:
+                from .latent_guide_context import (
+                    _require_latent_guide_mask_support,
+                )
+                _require_latent_guide_mask_support()
+            if "masked_av" in required_mask_modes:
+                # Keep the upstream masked_av capability gate unchanged.
                 from .masked_context import _require_h3_mask_support
-
                 _require_h3_mask_support()
-            if continuation_mode == "masked_av":
+            if continuation_mode in ("latent_guide", "masked_av"):
                 prepared_conditioning = conditioning
             else:
                 prepared_conditioning = _prepare_native_guide_conditioning(
@@ -4734,12 +4776,47 @@ class MiniMaxH3ChainContext:
                 False,
                 latent,
             )
+        if continuation_mode == "latent_guide":
+            previous_latent: Any = state.get("previous_latent")
+            if previous_latent is not None:
+                from .latent_guide_context import apply_latent_guide_prefix
+                out_conditioning, out_latent, trim = apply_latent_guide_prefix(
+                    conditioning=conditioning,
+                    latent=latent,
+                    previous_latent=previous_latent,
+                    context_length=context_length,
+                )
+                return (out_conditioning, trim, True, out_latent)
+            if not external_first:
+                raise ValueError(
+                    "H3 latent guide continuation has no previous sampled AV "
+                    "latent.")
+            previous_frames = state.get("previous_frames")
+            if previous_frames is None:
+                raise ValueError(
+                    "H3 latent guide external continuation has no previous "
+                    "frame checkpoint.")
+            _LOG.info(
+                "H3 latent guide scene 1 has imported context but no native "
+                "sampled latent; using the masked decoded-frame VAE fallback.")
+            from .masked_context import apply_masked_prefix
+            out_conditioning, out_latent, trim = apply_masked_prefix(
+                conditioning=conditioning,
+                vae=vae,
+                latent=latent,
+                previous_frames=previous_frames,
+                context_length=context_length,
+                crop=cfg["crop"],
+                previous_latent=None,
+                audio_vae=audio_vae,
+                previous_audio=state.get("previous_audio"),
+            )
+            return (out_conditioning, trim, True, out_latent)
         previous_frames = state.get("previous_frames")
         if previous_frames is None:
             raise ValueError("H3 chain continuation has no previous frame checkpoint.")
         if continuation_mode == "masked_av":
             from .masked_context import apply_masked_prefix
-
             previous_latent = state.get("previous_latent")
             out_conditioning, out_latent, trim = apply_masked_prefix(
                 conditioning=conditioning,
@@ -4754,10 +4831,11 @@ class MiniMaxH3ChainContext:
                                 if external_first else None),
             )
             return (out_conditioning, trim, True, out_latent)
-        previous_latent = (state.get("previous_latent")
-                           if generated_audio_context else None)
-        previous_audio = (state.get("previous_audio")
-                          if generated_audio_context and external_first else None)
+        previous_latent: Any = (
+            state.get("previous_latent") if generated_audio_context else None)
+        previous_audio: Any = (
+            state.get("previous_audio")
+            if generated_audio_context and external_first else None)
         if (generated_audio_context and previous_latent is None
                 and previous_audio is None and not external_first):
             raise ValueError("H3 chain continuation has no previous AV latent.")
@@ -4773,7 +4851,8 @@ class MiniMaxH3ChainContext:
             audio_context_length=(audio_context_length
                                   if generated_audio_context else 0),
             audio_mode="timeline",
-            context_latent=previous_latent,
+            context_latent=(previous_latent
+                            if generated_audio_context else None),
             audio_vae=audio_vae,
             context_audio=previous_audio,
         )
@@ -4804,6 +4883,11 @@ class MiniMaxH3ChainSegmentSave:
                                "Connect it in every audio mode to preserve "
                                "H3's generated sound as WAV sidecars. Required "
                                "for generated_audio and synchronized review."}),
+                "audio_with_overlap": ("AUDIO", {
+                    "tooltip": "Decoded audio from the CURRENT H3 sample "
+                               "BEFORE MiniMax H3 Contex Loop Trim. It retains "
+                               "the repeated leading context for overlap-aware "
+                               "generated-audio assembly."}),
                 "images_with_overlap": ("IMAGE", {
                     "tooltip": "Blend-ready output from Loop Trim. Required "
                                "only when Plan video_blend_frames is above 0. "
@@ -4835,7 +4919,8 @@ class MiniMaxH3ChainSegmentSave:
         return float("NaN")
 
     def save(self, state, images, sampled_latent, audio=None,
-             images_with_overlap=None, prompt=None, extra_pnginfo=None):
+             audio_with_overlap=None, images_with_overlap=None, prompt=None,
+             extra_pnginfo=None):
         if _st_save is None:
             raise RuntimeError("safetensors is required for H3 chain checkpoints.")
         plan = state["plan"]
@@ -4891,6 +4976,20 @@ class MiniMaxH3ChainSegmentSave:
                 audio, "H3 chain clip %d delivered audio" % index,
                 expected_frames=expected_frames)
             tensors["delivered_audio"] = _tensor_cpu_clone(waveform)
+        if audio_with_overlap is not None:
+            if audio is None:
+                raise ValueError(
+                    "H3 chain clip %d audio_with_overlap requires delivered "
+                    "audio on Segment Save as well." % index)
+            overlap_waveform, overlap_sample_rate = _validate_audio(
+                audio_with_overlap,
+                "H3 chain clip %d decoded audio with overlap" % index)
+            if overlap_sample_rate != sample_rate:
+                raise ValueError(
+                    "H3 chain clip %d delivered and overlap audio sample "
+                    "rates do not match (%d Hz vs %d Hz)." %
+                    (index, sample_rate, overlap_sample_rate))
+            tensors["overlap_audio"] = _tensor_cpu_clone(overlap_waveform)
 
         paths = _artifact_paths(plan, index)
         os.makedirs(os.path.dirname(paths["segment"]), exist_ok=True)
@@ -5789,11 +5888,10 @@ class MiniMaxH3ChainManifestLoad:
 def _generated_audio(manifest: dict[str, Any]) -> dict[str, Any]:
     if _st_load is None or torch is None:
         raise RuntimeError("Generated-audio assembly requires safetensors and torch.")
-    waveforms = []
+    assembled = None
     sample_rate = None
-    # Cumulative boundary budgeting was inspired by seitanism's
-    # ComfyUI-H3-Motion-Context-MultiRef. Reconcile each saved scene against
-    # the full delivered timeline so independent rounding cannot accumulate.
+    # Reconcile every write against absolute frame boundaries so independent
+    # frame-to-sample rounding cannot accumulate across scene seams.
     cumulative_frames = 0
     cumulative_samples = 0
     for segment in manifest["segments"]:
@@ -5812,27 +5910,68 @@ def _generated_audio(manifest: dict[str, Any]) -> dict[str, Any]:
         elif current_rate != sample_rate:
             raise ValueError("Generated segment audio sample rates do not match.")
         waveform = tensors["delivered_audio"]
+        delivered_frames = int(segment["delivered_frames"])
+        raw_frames = int(segment.get("raw_frames", delivered_frames))
+        overlap_frames = raw_frames - delivered_frames
+        if overlap_frames < 0:
+            raise ValueError(
+                "Checkpoint for clip %d has %d raw frames but delivers %d." %
+                (segment["index"], raw_frames, delivered_frames))
         expected = int(round(
-            int(segment["delivered_frames"]) / float(FPS) * current_rate))
+            delivered_frames / float(FPS) * current_rate))
         if int(waveform.shape[-1]) != expected:
             raise ValueError(
                 "Checkpoint for clip %d has %d delivered audio samples; expected "
                 "%d for %d frames." %
                 (segment["index"], int(waveform.shape[-1]), expected,
-                 int(segment["delivered_frames"])))
-        cumulative_frames += int(segment["delivered_frames"])
+                 delivered_frames))
+
+        next_frames = cumulative_frames + delivered_frames
         next_boundary = int(round(
-            cumulative_frames / float(FPS) * current_rate))
-        budget = next_boundary - cumulative_samples
-        have = int(waveform.shape[-1])
-        if have > budget:
-            waveform = waveform[..., :budget]
-        elif have < budget:
-            waveform = torch.nn.functional.pad(waveform, (0, budget - have))
-        waveforms.append(waveform)
+            next_frames / float(FPS) * current_rate))
+        overlap_waveform = tensors.get("overlap_audio")
+        overlap_start_frame = cumulative_frames - overlap_frames
+        use_overlap = (
+            assembled is not None
+            and overlap_waveform is not None
+            and overlap_frames > 0
+            and overlap_start_frame >= 0
+        )
+        if use_overlap:
+            overlap_start_sample = int(round(
+                overlap_start_frame / float(FPS) * current_rate))
+            expected_full = next_boundary - overlap_start_sample
+            if tuple(overlap_waveform.shape[:-1]) != tuple(assembled.shape[:-1]):
+                raise ValueError(
+                    "Checkpoint for clip %d overlap audio shape %r does not "
+                    "match assembled audio shape %r." %
+                    (segment["index"], tuple(overlap_waveform.shape[:-1]),
+                     tuple(assembled.shape[:-1])))
+            have = int(overlap_waveform.shape[-1])
+            if have > expected_full:
+                overlap_waveform = overlap_waveform[..., :expected_full]
+            elif have < expected_full:
+                overlap_waveform = torch.nn.functional.pad(
+                    overlap_waveform, (0, expected_full - have))
+            assembled = torch.cat((
+                assembled[..., :overlap_start_sample], overlap_waveform), dim=-1)
+            _LOG.info(
+                "H3 generated audio: clip %d owns %d-frame protected overlap "
+                "from absolute frame %d.",
+                segment["index"], overlap_frames, overlap_start_frame)
+        else:
+            budget = next_boundary - cumulative_samples
+            have = int(waveform.shape[-1])
+            if have > budget:
+                waveform = waveform[..., :budget]
+            elif have < budget:
+                waveform = torch.nn.functional.pad(
+                    waveform, (0, budget - have))
+            assembled = (waveform if assembled is None else
+                         torch.cat((assembled, waveform), dim=-1))
+        cumulative_frames = next_frames
         cumulative_samples = next_boundary
-    return {"waveform": torch.cat(waveforms, dim=-1),
-            "sample_rate": int(sample_rate)}
+    return {"waveform": assembled, "sample_rate": int(sample_rate)}
 
 
 def _validate_prelude(manifest: dict[str, Any]) -> dict[str, Any] | None:
@@ -5924,6 +6063,66 @@ def _audio_with_prelude(
             (prefix, normalized_extension["waveform"]), dim=-1),
         "sample_rate": sample_rate,
     }
+
+def _generated_audio_with_prelude(
+    audio: dict[str, Any],
+    extension_frames: int,
+    prelude: dict[str, Any],
+    manifest: dict[str, Any],
+) -> dict[str, Any]:
+    """Let scene 1 own the generated-audio overlap with a saved prelude."""
+    combined = _audio_with_prelude(audio, extension_frames, prelude)
+    segments = manifest.get("segments") or []
+    if not segments:
+        return combined
+    first = segments[0]
+    delivered_frames = int(first["delivered_frames"])
+    raw_frames = int(first.get("raw_frames", delivered_frames))
+    overlap_frames = raw_frames - delivered_frames
+    if overlap_frames <= 0:
+        return combined
+    prelude_frames = int(prelude["frame_count"])
+    overlap_start_frame = prelude_frames - overlap_frames
+    if overlap_start_frame < 0:
+        raise ValueError(
+            "H3 chain clip 1 audio overlap is %d frames, but the prelude has "
+            "only %d frames." % (overlap_frames, prelude_frames))
+    if _st_load is None:
+        raise RuntimeError(
+            "Generated-audio prelude ownership requires safetensors.")
+    checkpoint = _absolute_output_path(first["checkpoint"])
+    tensors = _st_load(checkpoint)
+    overlap_waveform = tensors.get("overlap_audio")
+    if overlap_waveform is None:
+        return combined
+    waveform, sample_rate = _audio_waveform_3d(
+        combined, "H3 generated audio with prelude")
+    current_rate = int(first.get("sample_rate", 0))
+    if current_rate != sample_rate:
+        raise ValueError(
+            "H3 chain clip 1 overlap audio sample rate %d does not match "
+            "assembled generated audio sample rate %d." %
+            (current_rate, sample_rate))
+    channels = int(waveform.shape[1])
+    overlap_start_sample = int(round(
+        overlap_start_frame / float(FPS) * sample_rate))
+    first_end_sample = int(round(
+        (prelude_frames + delivered_frames) / float(FPS) * sample_rate))
+    ownership_samples = first_end_sample - overlap_start_sample
+    normalized_overlap = _resample_audio_exact(
+        {"waveform": overlap_waveform, "sample_rate": sample_rate},
+        sample_rate, ownership_samples, channels,
+        "H3 chain clip 1 prelude overlap audio")["waveform"]
+    merged = torch.cat((
+        waveform[..., :overlap_start_sample],
+        normalized_overlap,
+        waveform[..., first_end_sample:],
+    ), dim=-1)
+    _LOG.info(
+        "H3 generated audio: clip 1 owns %d-frame prelude overlap from "
+        "absolute frame %d.",
+        overlap_frames, overlap_start_frame)
+    return {"waveform": merged, "sample_rate": sample_rate}
 
 
 def _validate_manifest(manifest: dict[str, Any]) -> list[dict[str, Any]]:
@@ -6826,11 +7025,15 @@ class MiniMaxH3ChainAssemble:
         prelude_frames = int(prelude["frame_count"]) if prelude is not None else 0
         total_output_frames = prelude_frames + extension_frames
         if audio is not None and prelude is not None:
-            audio = _audio_with_prelude(audio, extension_frames, prelude)
+            if selected == "generated":
+                audio = _generated_audio_with_prelude(
+                    audio, extension_frames, prelude, manifest)
+            else:
+                audio = _audio_with_prelude(audio, extension_frames, prelude)
         generated_sidecar_audio = generated_track if preserve_generated else None
         if generated_sidecar_audio is not None and prelude is not None:
-            generated_sidecar_audio = _audio_with_prelude(
-                generated_sidecar_audio, extension_frames, prelude)
+            generated_sidecar_audio = _generated_audio_with_prelude(
+                generated_sidecar_audio, extension_frames, prelude, manifest)
 
         run_name = _safe_name(manifest.get("run_name"), "h3_chain")
         run_dir = os.path.join(_output_root(), "h3_chains", run_name)

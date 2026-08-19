@@ -230,6 +230,50 @@ def _video_from_latent(latent):
     return video
 
 
+def _video_tail_from_latent(
+    latent: dict[str, object],
+    frame_count: int,
+) -> torch.Tensor:
+    """Return a cycle-aligned H3 video tail from a sampled AV latent."""
+    requested_frames: int = int(frame_count)
+    if requested_frames < 1:
+        raise ValueError(
+            "h3_motion_context: raw latent context must contain at least "
+            "one frame."
+        )
+
+    video: torch.Tensor = _video_from_latent(latent)
+    total_steps: int = int(video.shape[2])
+    total_frames: int = _pixel_frames(total_steps)
+    if requested_frames > total_frames:
+        raise ValueError(
+            f"h3_motion_context: raw latent contains {total_frames} frames; "
+            f"cannot extract {requested_frames} context frames."
+        )
+
+    tail_steps: int = 0
+    covered_frames: int = 0
+    while tail_steps < total_steps and covered_frames < requested_frames:
+        covered_frames += FRAME_PER_TOKEN[tail_steps % len(FRAME_PER_TOKEN)]
+        tail_steps += 1
+
+    if covered_frames != requested_frames:
+        raise ValueError(
+            f"h3_motion_context: {requested_frames} context frames do not "
+            "form a native H3 temporal run."
+        )
+
+    start_step: int = total_steps - tail_steps
+    phase: int = start_step % len(FRAME_PER_TOKEN)
+    if phase != 0:
+        raise ValueError(
+            f"h3_motion_context: {requested_frames}-frame raw latent tail "
+            f"starts at temporal phase {phase} instead of phase 0."
+        )
+
+    return video[:1, :, start_step:].contiguous()
+
+
 def _audio_tail_from_latent(latent, a_frames):
     """Slice the last `a_frames` worth of audio steps straight out of a
     generated H3 latent, skipping the decode -> re-encode round trip.
@@ -423,12 +467,14 @@ class MiniMaxH3MotionContext:
         blocks = []
         offsets = []
         span = 0
+        tail: torch.Tensor | None = None
         if n > 0:
-            # the LAST n frames of the incoming clip become the pinned run
             tail = _resize(context_frames[available - n:], width, height, crop)
 
         if n > 0 and encode_mode == "video":
-            # one call; the VAE reads the batch axis as time and compresses
+            if tail is None:
+                raise RuntimeError(
+                    "h3_motion_context: decoded video tail was not prepared.")
             enc = vae.encode(tail)
             if getattr(enc, "ndim", 0) != 5:
                 raise ValueError(
@@ -458,6 +504,9 @@ class MiniMaxH3MotionContext:
                 blocks = [enc[:, :, k:k + 1] for k in range(steps)]
             span = covered
         elif n > 0:
+            if tail is None:
+                raise RuntimeError(
+                    "h3_motion_context: decoded frame tail was not prepared.")
             for i in range(n):
                 blocks.append(vae.encode(tail[i:i + 1]))
                 offsets.append(i)

@@ -801,6 +801,7 @@ function mount(node) {
         for (const [value, label] of [
             ["", `Plan default · ${settings().continuationMode}`],
             ["guide", "Guide · new shot"],
+            ["latent_guide", "Latent Guide · raw latent"],
             ["masked_av", "Masked AV · same shot"],
         ]) {
             const option = element("option", "", label);
@@ -811,7 +812,7 @@ function mount(node) {
             ? shot.continuation_mode : "";
         continuation.title = state.active === 0
             ? "Continuation into this scene. Scene 1 uses it only with Existing Video Context."
-            : "Guide allows a new shot with continuity; Masked AV preserves an exact prefix for continuing the same shot.";
+            : "Guide uses VAE-encoded frames; Latent Guide uses the native sampled latent; Masked AV preserves an exact prefix for continuing the same shot.";
         continuation.addEventListener("change", () => {
             if (continuation.value) shot.continuation_mode = continuation.value;
             else delete shot.continuation_mode;

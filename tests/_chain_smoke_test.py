@@ -23,11 +23,16 @@ from datetime import datetime
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-COMFY_CANDIDATES = [ROOT.parent / "Comfyui", ROOT.parent / "ComfyUI"]
+COMFY_CANDIDATES = [
+    ROOT.parent / "Comfyui",
+    ROOT.parent / "ComfyUI",
+    ROOT.parent.parent,
+]
 COMFY = next((path for path in COMFY_CANDIDATES
               if (path / "comfy" / "options.py").is_file()), None)
 if COMFY is None:
-    raise SystemExit("adjacent ComfyUI checkout not found")
+    raise SystemExit(
+        "ComfyUI checkout not found next to the repo or above custom_nodes")
 
 sys.path.insert(0, str(COMFY))
 sys.argv = ["h3-chain-smoke", "--cpu"]
@@ -104,11 +109,41 @@ def main():
     async def review_route_check():
         token = "review-route-smoke"
         future = asyncio.get_running_loop().create_future()
+        plan = chain._normalize_plan(
+            json.dumps({
+                "prompt_prefix": "Shared only.",
+                "shots": [{
+                    "id": "review",
+                    "prompt": "",
+                    "length": 39,
+                    "seed": 7,
+                }],
+            }),
+            run_name="review-route-smoke",
+            width=32,
+            height=32,
+            context_length=22,
+            encode_mode="video",
+            anchor_mode="head",
+            crop="disabled",
+            audio_mode="source_track",
+            audio_context_length=0,
+            default_duration_seconds=15,
+            default_steps=2,
+            base_seed=0,
+            segment_crf=30,
+        )
         chain._PENDING_REVIEWS[token] = {
             "future": future,
             "loop": asyncio.get_running_loop(),
-            "public": {"token": token, "prompt_prefix": "Shared only."},
+            "public": {
+                "token": token,
+                "prompt_prefix": "Shared only.",
+                "clip_index": 1,
+            },
+            "plan": plan,
             "current_seed": 7,
+            "current_length": 39,
         }
 
         class Request:
