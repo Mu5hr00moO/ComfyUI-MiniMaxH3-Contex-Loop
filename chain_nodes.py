@@ -4868,6 +4868,11 @@ class MiniMaxH3ChainSegmentSave:
                                "Connect it in every audio mode to preserve "
                                "H3's generated sound as WAV sidecars. Required "
                                "for generated_audio and synchronized review."}),
+                "audio_with_overlap": ("AUDIO", {
+                    "tooltip": "Decoded audio from the CURRENT H3 sample "
+                               "BEFORE MiniMax H3 Contex Loop Trim. It retains "
+                               "the repeated leading context for overlap-aware "
+                               "generated-audio assembly."}),
                 "images_with_overlap": ("IMAGE", {
                     "tooltip": "Blend-ready output from Loop Trim. Required "
                                "only when Plan video_blend_frames is above 0. "
@@ -4899,7 +4904,8 @@ class MiniMaxH3ChainSegmentSave:
         return float("NaN")
 
     def save(self, state, images, sampled_latent, audio=None,
-             images_with_overlap=None, prompt=None, extra_pnginfo=None):
+             audio_with_overlap=None, images_with_overlap=None, prompt=None,
+             extra_pnginfo=None):
         if _st_save is None:
             raise RuntimeError("safetensors is required for H3 chain checkpoints.")
         plan = state["plan"]
@@ -4955,6 +4961,20 @@ class MiniMaxH3ChainSegmentSave:
                 audio, "H3 chain clip %d delivered audio" % index,
                 expected_frames=expected_frames)
             tensors["delivered_audio"] = _tensor_cpu_clone(waveform)
+        if audio_with_overlap is not None:
+            if audio is None:
+                raise ValueError(
+                    "H3 chain clip %d audio_with_overlap requires delivered "
+                    "audio on Segment Save as well." % index)
+            overlap_waveform, overlap_sample_rate = _validate_audio(
+                audio_with_overlap,
+                "H3 chain clip %d decoded audio with overlap" % index)
+            if overlap_sample_rate != sample_rate:
+                raise ValueError(
+                    "H3 chain clip %d delivered and overlap audio sample "
+                    "rates do not match (%d Hz vs %d Hz)." %
+                    (index, sample_rate, overlap_sample_rate))
+            tensors["overlap_audio"] = _tensor_cpu_clone(overlap_waveform)
 
         paths = _artifact_paths(plan, index)
         os.makedirs(os.path.dirname(paths["segment"]), exist_ok=True)
@@ -5853,11 +5873,10 @@ class MiniMaxH3ChainManifestLoad:
 def _generated_audio(manifest: dict[str, Any]) -> dict[str, Any]:
     if _st_load is None or torch is None:
         raise RuntimeError("Generated-audio assembly requires safetensors and torch.")
-    waveforms = []
+    assembled = None
     sample_rate = None
-    # Cumulative boundary budgeting was inspired by seitanism's
-    # ComfyUI-H3-Motion-Context-MultiRef. Reconcile each saved scene against
-    # the full delivered timeline so independent rounding cannot accumulate.
+    # Reconcile every write against absolute frame boundaries so independent
+    # frame-to-sample rounding cannot accumulate across scene seams.
     cumulative_frames = 0
     cumulative_samples = 0
     for segment in manifest["segments"]:
@@ -5876,27 +5895,68 @@ def _generated_audio(manifest: dict[str, Any]) -> dict[str, Any]:
         elif current_rate != sample_rate:
             raise ValueError("Generated segment audio sample rates do not match.")
         waveform = tensors["delivered_audio"]
+        delivered_frames = int(segment["delivered_frames"])
+        raw_frames = int(segment.get("raw_frames", delivered_frames))
+        overlap_frames = raw_frames - delivered_frames
+        if overlap_frames < 0:
+            raise ValueError(
+                "Checkpoint for clip %d has %d raw frames but delivers %d." %
+                (segment["index"], raw_frames, delivered_frames))
         expected = int(round(
-            int(segment["delivered_frames"]) / float(FPS) * current_rate))
+            delivered_frames / float(FPS) * current_rate))
         if int(waveform.shape[-1]) != expected:
             raise ValueError(
                 "Checkpoint for clip %d has %d delivered audio samples; expected "
                 "%d for %d frames." %
                 (segment["index"], int(waveform.shape[-1]), expected,
-                 int(segment["delivered_frames"])))
-        cumulative_frames += int(segment["delivered_frames"])
+                 delivered_frames))
+
+        next_frames = cumulative_frames + delivered_frames
         next_boundary = int(round(
-            cumulative_frames / float(FPS) * current_rate))
-        budget = next_boundary - cumulative_samples
-        have = int(waveform.shape[-1])
-        if have > budget:
-            waveform = waveform[..., :budget]
-        elif have < budget:
-            waveform = torch.nn.functional.pad(waveform, (0, budget - have))
-        waveforms.append(waveform)
+            next_frames / float(FPS) * current_rate))
+        overlap_waveform = tensors.get("overlap_audio")
+        overlap_start_frame = cumulative_frames - overlap_frames
+        use_overlap = (
+            assembled is not None
+            and overlap_waveform is not None
+            and overlap_frames > 0
+            and overlap_start_frame >= 0
+        )
+        if use_overlap:
+            overlap_start_sample = int(round(
+                overlap_start_frame / float(FPS) * current_rate))
+            expected_full = next_boundary - overlap_start_sample
+            if tuple(overlap_waveform.shape[:-1]) != tuple(assembled.shape[:-1]):
+                raise ValueError(
+                    "Checkpoint for clip %d overlap audio shape %r does not "
+                    "match assembled audio shape %r." %
+                    (segment["index"], tuple(overlap_waveform.shape[:-1]),
+                     tuple(assembled.shape[:-1])))
+            have = int(overlap_waveform.shape[-1])
+            if have > expected_full:
+                overlap_waveform = overlap_waveform[..., :expected_full]
+            elif have < expected_full:
+                overlap_waveform = torch.nn.functional.pad(
+                    overlap_waveform, (0, expected_full - have))
+            assembled = torch.cat((
+                assembled[..., :overlap_start_sample], overlap_waveform), dim=-1)
+            _LOG.info(
+                "H3 generated audio: clip %d owns %d-frame protected overlap "
+                "from absolute frame %d.",
+                segment["index"], overlap_frames, overlap_start_frame)
+        else:
+            budget = next_boundary - cumulative_samples
+            have = int(waveform.shape[-1])
+            if have > budget:
+                waveform = waveform[..., :budget]
+            elif have < budget:
+                waveform = torch.nn.functional.pad(
+                    waveform, (0, budget - have))
+            assembled = (waveform if assembled is None else
+                         torch.cat((assembled, waveform), dim=-1))
+        cumulative_frames = next_frames
         cumulative_samples = next_boundary
-    return {"waveform": torch.cat(waveforms, dim=-1),
-            "sample_rate": int(sample_rate)}
+    return {"waveform": assembled, "sample_rate": int(sample_rate)}
 
 
 def _validate_prelude(manifest: dict[str, Any]) -> dict[str, Any] | None:
