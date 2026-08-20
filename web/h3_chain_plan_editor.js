@@ -886,7 +886,7 @@ function mountEditor(node) {
         continuation.value = Object.hasOwn(shot, "continuation_mode")
             ? shot.continuation_mode : "";
         continuation.title = index === 0
-            ? "Continuation into this scene. Scene 1 uses it only when Existing Video Context supplies a predecessor. Guide uses VAE-encoded frames; Latent Guide uses the native sampled latent; Masked AV preserves the same shot exactly."
+            ? "Continuation into this scene. Scene 1 uses it only when Existing Video Context supplies a predecessor. Guide uses VAE-encoded frames; Latent Guide uses the masked decoded-frame VAE fallback because imported scene 1 has no sampled predecessor latent; Masked AV preserves the same shot exactly."
             : "Continuation from the preceding scene into this one. Guide uses VAE-encoded frames; Latent Guide uses the native sampled latent; Masked AV preserves an exact prefix for the same shot.";
         continuation.addEventListener("change", () => {
             if (continuation.value) {
