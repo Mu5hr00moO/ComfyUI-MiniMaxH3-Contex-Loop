@@ -79,6 +79,8 @@ def main():
             "compatibility": {
                 "audio_mode": "source_track",
                 "context_length": 2,
+                "audio_context_length": 2,
+                "continuation_mode": "guide",
                 "video_blend_frames": 2,
             },
             "shots": [{
@@ -122,6 +124,9 @@ def main():
         assert first_result["ui"]["animated"] == (True,)
         assert first["generated_audio_sha256"] == chain._file_sha256(
             str(first_paths["generated_audio"]))
+        assert first["branch_id"] == first["revision"]
+        assert first["resolved_context_length"] == 0
+        assert first["resolved_audio_context_length"] == 0
         with wave.open(str(first_paths["generated_audio"]), "rb") as audio_file:
             assert audio_file.getnchannels() == 2
             assert audio_file.getframerate() == 8000
@@ -139,6 +144,8 @@ def main():
         second = second_result["result"][0]
         assert second["revision"] != first["revision"]
         assert second["supersedes"] == first["revision_metadata"]
+        assert second["branch_id"] == second["revision"]
+        assert second["forked_from_branch_id"] == first["branch_id"]
         assert second["generated_audio"] != first["generated_audio"]
         assert second["blend_segment"] != first["blend_segment"]
         assert second["blend_frames"] == 2
@@ -156,6 +163,50 @@ def main():
         assert current["segment"]["prompt"] == "second take"
         assert archived["segment"]["revision"] == first["revision"]
         assert archived["segment"]["prompt"] == "first take"
+
+        # A direct alternate take starts a branch. Later scenes regenerated
+        # because their parent changed inherit that branch instead of creating
+        # a new branch at every scene.
+        for index in (2, 3):
+            plan["shots"].append({
+                "id": "scene_%d" % index,
+                "prompt": "scene %d" % index,
+                "scene_prompt": "scene %d" % index,
+                "prompt_hash": "hash-%d" % index,
+                "seed": index,
+                "steps": 5,
+                "raw_frames": 7,
+                "delivered_frames": 5,
+                "generation_start_frame": (index - 1) * 5,
+            })
+        scene_two_old = saver.save(
+            {"plan": plan, "index": 2, "segments": [second]},
+            FakeImages(), object(), generated_audio, FakeBlendImages(),
+        )["result"][0]
+        scene_three_old = saver.save(
+            {"plan": plan, "index": 3,
+             "segments": [second, scene_two_old]},
+            FakeImages(), object(), generated_audio, FakeBlendImages(),
+        )["result"][0]
+        assert scene_two_old["branch_id"] == second["branch_id"]
+        assert scene_three_old["branch_id"] == second["branch_id"]
+
+        plan["shots"][1]["seed"] = 22
+        scene_two_new = saver.save(
+            {"plan": plan, "index": 2, "segments": [second]},
+            FakeImages(), object(), generated_audio, FakeBlendImages(),
+        )["result"][0]
+        assert scene_two_new["branch_id"] == scene_two_new["revision"]
+        assert scene_two_new["forked_from_branch_id"] == second["branch_id"]
+
+        plan["shots"][2]["seed"] = 33
+        scene_three_new = saver.save(
+            {"plan": plan, "index": 3,
+             "segments": [second, scene_two_new]},
+            FakeImages(), object(), generated_audio, FakeBlendImages(),
+        )["result"][0]
+        assert scene_three_new["branch_id"] == scene_two_new["branch_id"]
+        assert "forked_from_branch_id" not in scene_three_new
 
     print("H3 segment revisions: regeneration advances the active pointer and "
           "retains the previous take's video, checkpoint, prompt, and WAV")

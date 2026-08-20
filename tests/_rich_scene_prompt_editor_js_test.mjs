@@ -3,13 +3,35 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import {
+    PromptUndoHistory,
     RICH_PROMPT_GUIDES,
     normalizeRichGuide,
     optimizerSource,
+    promptUndoDirection,
     richGenerationMode,
     richGuideInstruction,
     tokenizeRichPrompt,
 } from "../web/h3_rich_prompt_editor_core.mjs";
+
+const undo = new PromptUndoHistory("A", {coalesceMs:750});
+assert.equal(undo.record("AB", {inputType:"insertText", now:100}), true);
+assert.equal(undo.record("ABC", {inputType:"insertText", now:200}), true);
+assert.equal(undo.undo(), "A");
+assert.equal(undo.redo(), "ABC");
+undo.record("ABC pasted", {inputType:"insertFromPaste", now:250});
+assert.equal(undo.undo(), "ABC");
+undo.record("AB changed", {inputType:"insertReplacementText", now:300});
+assert.equal(undo.redo(), null);
+assert.equal(undo.align("External"), true);
+assert.equal(undo.undo(), null);
+assert.equal(promptUndoDirection({ctrlKey:true, key:"z"}), "undo");
+assert.equal(promptUndoDirection({metaKey:true, shiftKey:true, key:"Z"}), "redo");
+assert.equal(promptUndoDirection({ctrlKey:true, key:"y"}), "redo");
+assert.equal(promptUndoDirection({ctrlKey:true, altKey:true, key:"z"}), null);
+const synchronizedUndo = new PromptUndoHistory("Before");
+synchronizedUndo.record("After", {inputType:"insertReplacementText", now:400});
+assert.equal(synchronizedUndo.align("After"), false);
+assert.equal(synchronizedUndo.undo(), "Before");
 
 const records = [
     {kind:"picture", token:"@hero", label:"<Picture 1>", active:true},
@@ -73,11 +95,20 @@ assert.match(source, /data-token value/);
 assert.match(source, /setData\("text\/plain", text\)/);
 assert.match(source, /editor\.addEventListener\("copy"/);
 assert.match(source, /editor\.addEventListener\("cut"/);
-assert.match(source, /Keep the browser's live DOM and undo transaction intact/);
+assert.match(source, /shared text-level undo survives later tag decoration/);
+assert.match(source, /PromptUndoHistory/);
+assert.match(source, /promptUndoDirection/);
+assert.match(source, /applyPromptUndo/);
+assert.match(source, /recordPromptReplacement/);
+assert.match(source, /promptUndoForScene\(shotId, text, \{external:true\}\)/);
 assert.match(source, /tokenizeRichPrompt/);
 assert.match(source, /h3rp-token-picture/);
 assert.match(source, /h3rp-token-audio/);
 assert.match(source, /h3rp-token-thumb/);
+assert.match(source, /--h3rp-accent:color-mix\(in srgb,var\(--h3rp-text\)/);
+assert.match(source, /--h3rp-token-subject:color-mix/);
+assert.match(source, /color:var\(--h3rp-token-subject\)/);
+assert.doesNotMatch(source, /h3rp-token-subject \{ color:#8ed7a4/);
 assert.match(source, /h3rp-popover audio/);
 assert.match(source, /mediaElement\.controls = true/);
 assert.match(source, /Audio never autoplays/);

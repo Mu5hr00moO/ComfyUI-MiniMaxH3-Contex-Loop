@@ -193,7 +193,9 @@ assert.match(reviewSource, /_h3PromptCompanionSetScenePrompt/);
 assert.match(reviewSource, /reviewDurationText\(data\.raw_frames\)/);
 assert.match(reviewSource, /h3r-video-panel/);
 assert.match(reviewSource, /checkpoint-revisions\/restore/);
+assert.match(reviewSource, /checkpoint-revisions\/delete-preview/);
 assert.match(reviewSource, /checkpoint-revisions\/delete/);
+assert.match(reviewSource, /snapshot: preview\.snapshot/);
 const checkpointLoadStart = reviewSource.indexOf(
     'loadResume.addEventListener("click"',
 );

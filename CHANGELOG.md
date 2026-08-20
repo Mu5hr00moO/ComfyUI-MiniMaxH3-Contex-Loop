@@ -2,6 +2,42 @@
 
 Newest first. This file keeps release history out of the onboarding README.
 
+## v0.4.17 — Shared checkpoint lineage visibility
+
+- Repeated checkpoint revisions now keep the existing branch layout while
+  receiving a consistent color label and a vertical connector between every
+  branch line that shares the same clip.
+
+## v0.4.16 — Checkpoint Manager
+
+- Added a Plan-passthrough Checkpoint Manager that browses every saved run by
+  scene and inferred revision branch, previews saved video/audio, and exposes
+  prompts, seeds, frame counts, compatibility data, storage, lineage, and the
+  exact incoming video/audio context for each revision.
+- Added dependency-aware cleanup. Active revisions and revisions used by later
+  scenes are protected; the manager identifies every dependent scene and lets
+  users work backward from a leaf one revision at a time.
+- Added a two-step deletion contract shared with Review Gate. The server
+  previews every owned/shared file and preserved archive category, then rejects
+  confirmation if files, active pointers, or descendants changed in between.
+- New checkpoints persist creation time, effective continuation context, and a
+  stable branch identity so future runs need less lineage inference while old
+  checkpoint folders remain fully discoverable.
+
+## v0.4.15 — Light-theme prompt editor contrast
+
+- Made titles, active controls, and rich reference tags derive their semantic
+  colors from the active ComfyUI foreground. Both scene prompt editors retain
+  their pastel dark-theme palette while gaining readable contrast in light
+  themes.
+
+## v0.4.14 — Prompt editor undo
+
+- Added shared text-level Ctrl/Cmd+Z and redo history to both dedicated scene
+  prompt editors. Undo now survives rich-tag DOM decoration, plain-text paste,
+  toolbar insertion, Plan synchronization, and switching between rich and
+  plain presentation.
+
 ## v0.4.13 — Native mask readiness gate
 
 - Fixed the masked-AV preflight after merged PR #15375 removed

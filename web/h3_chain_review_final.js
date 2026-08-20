@@ -4,8 +4,8 @@ import {
     parsePlanJson,
     planToJson,
     promptValueToText,
-} from "./h3_chain_plan_core.mjs?v=0.4.13";
-import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.4.13";
+} from "./h3_chain_plan_core.mjs?v=0.4.17";
+import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.4.17";
 import {
     applyCheckpointRevisionSet,
     applyReviewEdit,
@@ -17,7 +17,7 @@ import {
     reviewLocalDeadline,
     reviewPlanScenePrompt,
     reviewSeed,
-} from "./h3_chain_review_core.mjs?v=0.4.13";
+} from "./h3_chain_review_core.mjs?v=0.4.17";
 
 const NODE_NAME = "MiniMaxH3ChainReview";
 const PLAN_NAME = "MiniMaxH3ChainPlan";
@@ -761,15 +761,36 @@ function mount(node) {
 
     async function deleteRevision(revision) {
         if (!revision || revision.active) return;
-        const confirmed = window.confirm(
-            `Permanently delete scene ${revision.scene} revision ` +
-            `${revision.revision.slice(0, 8)} and its segment, checkpoint, ` +
-            `audio, prompt, and preview files (${formatBytes(revision.sizeBytes)})? ` +
-            "This cannot be undone.",
-        );
-        if (!confirmed) return;
         try {
             const context = planResumeContext(node);
+            const previewResponse = await api.fetchApi(
+                "/minimax_h3_context_loop/checkpoint-revisions/delete-preview", {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({
+                        run_name: context.runName,
+                        scene: revision.scene,
+                        revision: revision.revision,
+                    }),
+                },
+            );
+            const preview = await previewResponse.json();
+            if (!previewResponse.ok) {
+                throw new Error(preview.error || `HTTP ${previewResponse.status}`);
+            }
+            if (!preview.allowed) {
+                throw new Error((preview.blockers ?? []).join(" ") ||
+                    "This checkpoint revision cannot be deleted safely.");
+            }
+            const confirmed = window.confirm(
+                `Permanently delete scene ${revision.scene} revision ` +
+                `${revision.revision.slice(0, 8)} and its ` +
+                `${preview.owned_file_count} owned files ` +
+                `(${formatBytes(preview.reclaimed_bytes)})? Run archives, ` +
+                "references, prompt history, and assembled exports are kept. " +
+                "This cannot be undone.",
+            );
+            if (!confirmed) return;
             const response = await api.fetchApi(
                 "/minimax_h3_context_loop/checkpoint-revisions/delete", {
                     method: "POST",
@@ -778,6 +799,7 @@ function mount(node) {
                         run_name: context.runName,
                         scene: revision.scene,
                         revision: revision.revision,
+                        snapshot: preview.snapshot,
                     }),
                 },
             );

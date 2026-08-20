@@ -109,3 +109,84 @@ export function optimizerSource(currentPrompt, previous = null) {
     }
     return current;
 }
+
+function undoInputGroup(inputType) {
+    const type = String(inputType ?? "");
+    if (type === "insertText") return "typing";
+    if (type === "deleteContentBackward") return "backspace";
+    if (type === "deleteContentForward") return "delete";
+    return "";
+}
+
+export function promptUndoDirection(event) {
+    if (!event || event.altKey || !(event.ctrlKey || event.metaKey)) return null;
+    const key = String(event.key ?? "").toLowerCase();
+    if (key === "z") return event.shiftKey ? "redo" : "undo";
+    if (key === "y" && !event.shiftKey) return "redo";
+    return null;
+}
+
+/** Text-level undo survives contenteditable token decoration, which replaces
+ * DOM children and therefore discards the browser's native undo manager. */
+export class PromptUndoHistory {
+    constructor(initialText = "", {limit = 100, coalesceMs = 750} = {}) {
+        this.limit = Math.max(1, Math.trunc(Number(limit) || 100));
+        this.coalesceMs = Math.max(0, Number(coalesceMs) || 0);
+        this.reset(initialText);
+    }
+
+    reset(text = "") {
+        this.current = String(text ?? "");
+        this.undoStack = [];
+        this.redoStack = [];
+        this.lastGroup = "";
+        this.lastTime = 0;
+        return this.current;
+    }
+
+    align(text = "") {
+        const value = String(text ?? "");
+        if (value === this.current) return false;
+        this.reset(value);
+        return true;
+    }
+
+    record(text, {inputType = "", now = Date.now()} = {}) {
+        const value = String(text ?? "");
+        if (value === this.current) return false;
+        const group = undoInputGroup(inputType);
+        const timestamp = Number(now) || 0;
+        const coalesced = Boolean(
+            group && group === this.lastGroup
+            && timestamp - this.lastTime >= 0
+            && timestamp - this.lastTime <= this.coalesceMs
+        );
+        if (!coalesced) {
+            this.undoStack.push(this.current);
+            if (this.undoStack.length > this.limit) this.undoStack.shift();
+        }
+        this.current = value;
+        this.redoStack = [];
+        this.lastGroup = group;
+        this.lastTime = timestamp;
+        return true;
+    }
+
+    undo() {
+        if (!this.undoStack.length) return null;
+        this.redoStack.push(this.current);
+        this.current = this.undoStack.pop();
+        this.lastGroup = "";
+        this.lastTime = 0;
+        return this.current;
+    }
+
+    redo() {
+        if (!this.redoStack.length) return null;
+        this.undoStack.push(this.current);
+        this.current = this.redoStack.pop();
+        this.lastGroup = "";
+        this.lastTime = 0;
+        return this.current;
+    }
+}

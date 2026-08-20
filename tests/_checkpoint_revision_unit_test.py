@@ -110,7 +110,11 @@ def write_revision(run, scene, token, seed, active=False, predecessor=None):
     metadata = {
         "format": "h3_chain_segment_v3",
         "run_name": "revision_test",
-        "compatibility": {"context_length": 22, "audio_mode": "source_track"},
+        "compatibility": {
+            "context_length": 22,
+            "audio_context_length": 22,
+            "audio_mode": "generated_audio",
+        },
         "segment": segment,
     }
     metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
@@ -137,7 +141,7 @@ async def check():
             run, 1, new_one, 201, active=True)
         old_two_meta, _ = write_revision(
             run, 2, old_two, 102, predecessor=old_one_meta)
-        write_revision(
+        new_two_meta, new_two_files = write_revision(
             run, 2, new_two, 202, active=True, predecessor=new_one_meta)
 
         response = await chain._list_saved_checkpoints(GetRequest())
@@ -149,6 +153,22 @@ async def check():
                       if item["active"]) == [new_one, new_two]
         assert all(item["size_bytes"] > 0 for item in payload["revisions"])
         assert all(item.get("preview_video") for item in payload["revisions"])
+        assert payload["summary"]["branch_count"] == 2
+        assert len(payload["branches"]) == 2
+        indexed = {(item["scene"], item["revision"]): item
+                   for item in payload["revisions"]}
+        assert indexed[(1, new_one)]["context_length"] == 0
+        assert indexed[(1, new_one)]["audio_context_length"] == 0
+        assert indexed[(1, new_one)]["children"] == [{
+            "scene": 2,
+            "scene_id": "scene_2",
+            "revision": new_two,
+            "continuation_mode": "guide",
+            "context_length": 39,
+            "audio_context_length": 44,
+        }]
+        assert indexed[(2, new_two)]["parent"] == {
+            "scene": 1, "revision": new_one}
 
         mismatched = await chain._restore_checkpoint_revisions(JsonRequest({
             "run_name": "revision_test",
@@ -188,8 +208,70 @@ async def check():
         assert active_delete.status == 409
         assert "active" in json.loads(active_delete.text)["error"]
 
+        preview = await chain._preview_checkpoint_revision_deletion(JsonRequest({
+            "run_name": "revision_test", "scene": 1, "revision": new_one,
+        }))
+        assert preview.status == 200
+        preview_body = json.loads(preview.text)
+        assert not preview_body["allowed"]
+        assert [(item["scene"], item["revision"])
+                for item in preview_body["dependents"]] == [(2, new_two)]
+        blocked = await chain._delete_checkpoint_revision(JsonRequest({
+            "run_name": "revision_test", "scene": 1, "revision": new_one,
+            "snapshot": preview_body["snapshot"],
+        }))
+        assert blocked.status == 409
+        assert "depend" in json.loads(blocked.text)["error"]
+        assert all(path.exists() for path in new_one_files)
+
+        leaf_preview = await chain._preview_checkpoint_revision_deletion(
+            JsonRequest({
+                "run_name": "revision_test", "scene": 2,
+                "revision": new_two,
+            }))
+        leaf_body = json.loads(leaf_preview.text)
+        assert leaf_body["allowed"]
+        assert leaf_body["owned_file_count"] == len(new_two_files)
+        unpreviewed = await chain._delete_checkpoint_revision(JsonRequest({
+            "run_name": "revision_test", "scene": 2, "revision": new_two,
+        }))
+        assert unpreviewed.status == 409
+        assert "Preview" in json.loads(unpreviewed.text)["error"]
+
+        # Even an immutable sidecar changing between preview and confirmation
+        # invalidates the snapshot and requires the user to inspect it again.
+        prompt_path = next(path for path in new_two_files
+                           if path.name.endswith(".prompt.txt"))
+        prompt_path.write_text("changed after preview", encoding="utf-8")
+        stale = await chain._delete_checkpoint_revision(JsonRequest({
+            "run_name": "revision_test", "scene": 2, "revision": new_two,
+            "snapshot": leaf_body["snapshot"],
+        }))
+        assert stale.status == 409
+        assert "changed" in json.loads(stale.text)["error"]
+        leaf_preview = await chain._preview_checkpoint_revision_deletion(
+            JsonRequest({
+                "run_name": "revision_test", "scene": 2,
+                "revision": new_two,
+            }))
+        leaf_body = json.loads(leaf_preview.text)
+        leaf_delete = await chain._delete_checkpoint_revision(JsonRequest({
+            "run_name": "revision_test", "scene": 2, "revision": new_two,
+            "snapshot": leaf_body["snapshot"],
+        }))
+        assert leaf_delete.status == 200
+        assert not any(path.exists() for path in new_two_files)
+
+        parent_preview = await chain._preview_checkpoint_revision_deletion(
+            JsonRequest({
+                "run_name": "revision_test", "scene": 1,
+                "revision": new_one,
+            }))
+        parent_body = json.loads(parent_preview.text)
+        assert parent_body["allowed"]
         delete = await chain._delete_checkpoint_revision(JsonRequest({
             "run_name": "revision_test", "scene": 1, "revision": new_one,
+            "snapshot": parent_body["snapshot"],
         }))
         assert delete.status == 200
         deleted = json.loads(delete.text)

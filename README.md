@@ -252,8 +252,11 @@ To resume manually, keep the same `run_name`, set `start_clip` to the desired
 scene, and retain the same dependencies. A bounded `scene_range` accepts one
 scene (`3`) or one continuous range (`3:8`).
 
-Run Manager can restore archived prompts and Plan settings and optionally
-archive loader-backed image/audio/video assets under the run folder. See
+Checkpoint Manager identifies saved takes by scene and inferred branch,
+previews their media and exact video/audio dependencies, and safely deletes
+inactive leaves one revision at a time. Run Manager restores archived prompts
+and Plan settings and can archive loader-backed image/audio/video assets under
+the run folder. See
 [Runs, review, and recovery](docs/RUNS_AND_RECOVERY.md).
 
 ## Documentation
@@ -268,7 +271,7 @@ archive loader-backed image/audio/video assets under the run folder. See
 - [Audio and continuity](docs/AUDIO_AND_CONTINUITY.md) — audio modes, 15.070 s
   reference alignment, generated WAVs, trimming, and seam diagnostics.
 - [Runs, review, and recovery](docs/RUNS_AND_RECOVERY.md) — Review Gate,
-  checkpoints, Run Manager assets, partial output, and PNG export.
+  Checkpoint Manager, Run Manager assets, partial output, and PNG export.
 - [Advanced workflows](docs/ADVANCED_WORKFLOWS.md) — existing-video extension,
   long context, last-frame targets, and performance re-filming.
 - [Compatibility](docs/COMPATIBILITY.md) — patch ownership, native guides,

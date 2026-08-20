@@ -1,0 +1,672 @@
+import {app} from "/scripts/app.js";
+import {api} from "/scripts/api.js";
+import {
+    checkpointBranchRows,
+    checkpointDeletionTitle,
+    checkpointDependencyText,
+    checkpointRevisionKey,
+    formatCheckpointBytes,
+    selectedCheckpointRevision,
+} from "./h3_checkpoint_manager_core.mjs?v=0.4.17";
+
+const NODE_NAME = "MiniMaxH3ChainCheckpointManager";
+const PLAN_NAME = "MiniMaxH3ChainPlan";
+const RUN_PROPERTY = "h3_checkpoint_manager_run";
+const SCENE_PROPERTY = "h3_checkpoint_manager_scene";
+const REVISION_PROPERTY = "h3_checkpoint_manager_revision";
+const SHARED_COLORS = ["#6ea8ff", "#58c99d", "#bd8cff", "#e8a84f", "#f07f8c", "#55bfd0"];
+
+function nodeType(node) {
+    return node?.comfyClass ?? node?.type ?? "";
+}
+
+function upstreamPlanNode(start) {
+    const queue = [start];
+    const seen = new Set();
+    while (queue.length) {
+        const node = queue.shift();
+        if (!node || seen.has(node)) continue;
+        seen.add(node);
+        if (node !== start && nodeType(node) === PLAN_NAME) return node;
+        for (const input of node.inputs ?? []) {
+            if (input.link == null) continue;
+            const link = node.graph?.links?.[input.link];
+            const parent = link ? node.graph?.getNodeById?.(link.origin_id) : null;
+            if (parent) queue.push(parent);
+        }
+    }
+    return null;
+}
+
+function widget(node, name) {
+    return node?.widgets?.find((item) => item.name === name);
+}
+
+function element(tag, className = "", text = undefined) {
+    const item = document.createElement(tag);
+    if (className) item.className = className;
+    if (text !== undefined) item.textContent = text;
+    return item;
+}
+
+function button(label, title, action, className = "") {
+    const item = element("button", className, label);
+    item.type = "button";
+    item.title = title;
+    item.addEventListener("click", action);
+    return item;
+}
+
+function videoUrl(item) {
+    if (!item?.filename) return "";
+    const query = new URLSearchParams({
+        filename:item.filename,
+        subfolder:item.subfolder ?? "",
+        type:item.type ?? "output",
+    });
+    return api.apiURL(`/view?${query.toString()}`);
+}
+
+function localTime(value) {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? String(value || "unknown") : date.toLocaleString();
+}
+
+function sharedColor(key) {
+    let hash = 0;
+    for (const character of String(key ?? "")) {
+        hash = ((hash * 31) + character.codePointAt(0)) >>> 0;
+    }
+    return SHARED_COLORS[hash % SHARED_COLORS.length];
+}
+
+async function jsonRequest(path, options = {}) {
+    const response = await api.fetchApi(path, options);
+    const payload = await response.json();
+    if (!response.ok) throw Object.assign(
+        new Error(payload.error || `HTTP ${response.status}`), {payload});
+    return payload;
+}
+
+function injectStyles() {
+    if (document.getElementById("h3-checkpoint-manager-style")) return;
+    const style = document.createElement("style");
+    style.id = "h3-checkpoint-manager-style";
+    style.textContent = `
+      .h3cm-root { --h3cm-bg:color-mix(in srgb,var(--comfy-menu-bg,#202124) 93%,#101827);
+        --h3cm-panel:var(--comfy-input-bg,#15171d); --h3cm-border:var(--border-color,#586174);
+        --h3cm-text:var(--input-text,#edf1f8); --h3cm-muted:color-mix(in srgb,var(--h3cm-text) 58%,transparent);
+        --h3cm-accent:color-mix(in srgb,var(--h3cm-text) 38%,#4f83ff);
+        --h3cm-danger:color-mix(in srgb,var(--h3cm-text) 40%,#d44747);
+        box-sizing:border-box; width:100%; height:100%; min-height:620px; display:flex; flex-direction:column;
+        gap:8px; overflow:hidden; padding:10px; border:1px solid var(--h3cm-border); border-radius:9px;
+        background:var(--h3cm-bg); color:var(--h3cm-text); font:12px/1.4 system-ui,sans-serif; }
+      .h3cm-root *, .h3cm-root *::before, .h3cm-root *::after { box-sizing:border-box; }
+      .h3cm-head,.h3cm-run-row,.h3cm-scenes,.h3cm-branch-head,.h3cm-branch-path,.h3cm-delete-actions {
+        display:flex; align-items:center; gap:6px; }
+      .h3cm-head { justify-content:space-between; }
+      .h3cm-title { font-size:15px; font-weight:760; color:var(--h3cm-accent); }
+      .h3cm-summary,.h3cm-status,.h3cm-muted { color:var(--h3cm-muted); }
+      .h3cm-root button,.h3cm-root select { min-height:30px; border:1px solid var(--h3cm-border);
+        border-radius:6px; background:var(--h3cm-panel); color:var(--h3cm-text); font:inherit; }
+      .h3cm-root button { padding:5px 8px; cursor:pointer; }
+      .h3cm-root button:hover,.h3cm-root button:focus-visible { border-color:var(--h3cm-accent); outline:none; }
+      .h3cm-root button:disabled { cursor:not-allowed; opacity:.45; }
+      .h3cm-run-select { flex:1; min-width:0; padding:5px 7px; }
+      .h3cm-scenes { flex:0 0 auto; overflow:auto; padding-bottom:2px; }
+      .h3cm-scene { white-space:nowrap; }
+      .h3cm-scene-selected,.h3cm-revision-selected { border-color:var(--h3cm-accent) !important;
+        color:var(--h3cm-accent) !important; }
+      .h3cm-main { min-height:0; flex:1 1 auto; display:grid; grid-template-columns:minmax(310px,.9fr) minmax(390px,1.1fr); gap:8px; }
+      .h3cm-panel { min-height:0; overflow:auto; padding:8px; border:1px solid var(--h3cm-border);
+        border-radius:7px; background:color-mix(in srgb,var(--h3cm-panel) 90%,transparent); }
+      .h3cm-panel-title { display:flex; justify-content:space-between; gap:8px; margin-bottom:7px; font-weight:750; }
+      .h3cm-shared-legend { color:var(--h3cm-muted); font-size:10px; font-weight:500; }
+      .h3cm-branches { position:relative; }
+      .h3cm-branch { position:relative; z-index:1; margin-bottom:8px; padding:6px;
+        border:1px solid color-mix(in srgb,var(--h3cm-border) 75%,transparent); border-radius:6px; }
+      .h3cm-branch-head { justify-content:space-between; margin-bottom:5px; }
+      .h3cm-branch-active { color:var(--h3cm-accent); font-weight:700; }
+      .h3cm-branch-path { position:relative; z-index:3; align-items:stretch; overflow:auto; padding-bottom:2px; }
+      .h3cm-arrow { align-self:center; color:var(--h3cm-muted); }
+      .h3cm-revision { position:relative; min-width:112px; text-align:left; white-space:nowrap; }
+      .h3cm-revision small { display:block; color:var(--h3cm-muted); font-size:10px; }
+      .h3cm-revision-shared { border-color:var(--h3cm-shared-color) !important;
+        box-shadow:inset 3px 0 0 var(--h3cm-shared-color); }
+      .h3cm-shared-label { display:block; width:max-content; margin:2px 0; padding:1px 5px;
+        border-radius:999px; background:color-mix(in srgb,var(--h3cm-shared-color) 23%,transparent);
+        color:color-mix(in srgb,var(--h3cm-shared-color) 72%,var(--h3cm-text)); font-size:9px; font-weight:750; }
+      .h3cm-shared-links { position:absolute; inset:0 auto auto 0; z-index:2; overflow:visible;
+        pointer-events:none; }
+      .h3cm-shared-link { fill:none; stroke-width:2; stroke-dasharray:4 3; opacity:.9; }
+      .h3cm-detail { display:flex; flex-direction:column; gap:8px; }
+      .h3cm-preview { width:100%; max-height:280px; min-height:150px; object-fit:contain; border-radius:6px; background:#08090c; }
+      .h3cm-audio { width:100%; height:36px; }
+      .h3cm-inspector { display:grid; grid-template-columns:auto minmax(0,1fr); gap:3px 9px; }
+      .h3cm-inspector dt { color:var(--h3cm-muted); }
+      .h3cm-inspector dd { margin:0; overflow-wrap:anywhere; }
+      .h3cm-prompt { max-height:90px; overflow:auto; padding:6px; border-radius:5px;
+        background:var(--h3cm-panel); white-space:pre-wrap; overflow-wrap:anywhere; }
+      .h3cm-delete { flex:0 0 auto; max-height:210px; overflow:auto; padding:8px;
+        border:1px solid var(--h3cm-border); border-radius:7px; }
+      .h3cm-delete-blocked { border-color:var(--h3cm-danger); }
+      .h3cm-delete-title { font-weight:700; }
+      .h3cm-files,.h3cm-dependents { margin:5px 0 0; padding-left:18px; }
+      .h3cm-dependent { color:var(--h3cm-danger); cursor:pointer; }
+      .h3cm-delete-actions { margin-top:7px; }
+      .h3cm-delete-button { margin-left:auto; color:var(--h3cm-danger) !important; }
+      .h3cm-error { color:var(--h3cm-danger); }
+      @media (max-width:760px) { .h3cm-main { grid-template-columns:1fr; }
+        .h3cm-root { overflow:auto; } }
+    `;
+    document.head.append(style);
+}
+
+function mount(node) {
+    if (node._h3CheckpointManagerMounted) return;
+    node._h3CheckpointManagerMounted = true;
+    injectStyles();
+    node.properties ??= {};
+    const state = {
+        runs:[], runName:String(node.properties[RUN_PROPERTY] ?? ""), payload:null,
+        scene:Number(node.properties[SCENE_PROPERTY]) || null,
+        revision:String(node.properties[REVISION_PROPERTY] ?? ""),
+        selected:null, deletion:null, busy:false, requestToken:0, sharedLinkFrame:0,
+    };
+    const root = element("div", "h3cm-root");
+    const head = element("div", "h3cm-head");
+    const title = element("div", "h3cm-title", "Checkpoint Manager");
+    const summary = element("div", "h3cm-summary", "Select a saved run");
+    head.append(title, summary);
+    const runRow = element("div", "h3cm-run-row");
+    const runSelect = element("select", "h3cm-run-select");
+    const refresh = button("Refresh", "Rescan saved runs and checkpoint revisions", () => void refreshRuns());
+    const open = button("Open folder", "Open the selected run folder on the ComfyUI host", () => void openFolder());
+    runRow.append(runSelect, refresh, open);
+    const scenes = element("div", "h3cm-scenes");
+    const main = element("div", "h3cm-main");
+    const branchesPanel = element("section", "h3cm-panel");
+    const branchesTitle = element("div", "h3cm-panel-title", "Revision branches");
+    branchesTitle.append(element("span", "h3cm-shared-legend", "color + vertical link = shared clip"));
+    const branches = element("div", "h3cm-branches");
+    branchesPanel.append(branchesTitle, branches);
+    const detail = element("section", "h3cm-panel h3cm-detail");
+    const preview = element("video", "h3cm-preview");
+    preview.controls = true;
+    preview.preload = "metadata";
+    const audio = element("audio", "h3cm-audio");
+    audio.controls = true;
+    audio.preload = "metadata";
+    audio.hidden = true;
+    const inspector = element("dl", "h3cm-inspector");
+    const prompt = element("div", "h3cm-prompt");
+    detail.append(preview, audio, inspector, prompt);
+    main.append(branchesPanel, detail);
+    const deletion = element("section", "h3cm-delete");
+    const deletionTitle = element("div", "h3cm-delete-title", "Select a checkpoint revision.");
+    const deletionBody = element("div");
+    const deletionActions = element("div", "h3cm-delete-actions");
+    const status = element("div", "h3cm-status");
+    const remove = button("Delete selected revision", "Delete this inactive leaf revision after confirmation", () => void deleteSelected(), "h3cm-delete-button");
+    remove.disabled = true;
+    deletionActions.append(status, remove);
+    deletion.append(deletionTitle, deletionBody, deletionActions);
+    root.append(head, runRow, scenes, main, deletion);
+
+    function activePlanRun() {
+        const plan = upstreamPlanNode(node);
+        return String(widget(plan, "run_name")?.value ?? "").trim();
+    }
+
+    function persistSelection() {
+        node.properties[RUN_PROPERTY] = state.runName;
+        node.properties[SCENE_PROPERTY] = state.scene;
+        node.properties[REVISION_PROPERTY] = state.revision;
+    }
+
+    function setBusy(value, message = "") {
+        state.busy = Boolean(value);
+        runSelect.disabled = state.busy;
+        refresh.disabled = state.busy;
+        open.disabled = state.busy || !state.runName;
+        remove.disabled = state.busy || !state.deletion?.allowed;
+        if (message) status.textContent = message;
+    }
+
+    function selectRevision(record, requestDeletion = true) {
+        state.selected = record;
+        state.scene = record ? Number(record.scene) : null;
+        state.revision = record ? String(record.revision) : "";
+        state.deletion = null;
+        persistSelection();
+        render();
+        if (record && requestDeletion) void refreshDeletionPreview();
+    }
+
+    function renderScenes() {
+        scenes.replaceChildren();
+        for (const scene of state.payload?.scenes ?? []) {
+            const label = `${scene.scene} · ${scene.scene_id} · ${scene.revision_count} take${scene.revision_count === 1 ? "" : "s"}`;
+            const item = button(label, `${formatCheckpointBytes(scene.bytes)} saved for this scene`, () => {
+                selectRevision(selectedCheckpointRevision(state.payload, scene.scene));
+            }, "h3cm-scene");
+            if (Number(scene.scene) === Number(state.scene)) item.classList.add("h3cm-scene-selected");
+            scenes.append(item);
+        }
+    }
+
+    function renderBranches() {
+        branches.replaceChildren();
+        const rows = checkpointBranchRows(state.payload);
+        if (!rows.length) {
+            branches.append(element("div", "h3cm-muted", "No versioned checkpoints were found."));
+            return;
+        }
+        const occurrences = new Map();
+        for (const branch of rows) {
+            for (const revision of branch.revisions) {
+                const key = checkpointRevisionKey(revision.scene, revision.revision);
+                occurrences.set(key, (occurrences.get(key) ?? 0) + 1);
+            }
+        }
+        for (const branch of rows) {
+            const row = element("div", "h3cm-branch");
+            const header = element("div", "h3cm-branch-head");
+            const name = element("span", branch.active ? "h3cm-branch-active" : "", branch.label);
+            const count = element("span", "h3cm-muted", `${branch.revisions.length} scene${branch.revisions.length === 1 ? "" : "s"}`);
+            header.append(name, count);
+            const path = element("div", "h3cm-branch-path");
+            branch.revisions.forEach((revision, index) => {
+                if (index) path.append(element("span", "h3cm-arrow", "→"));
+                const key = checkpointRevisionKey(revision.scene, revision.revision);
+                const sharedCount = occurrences.get(key) ?? 1;
+                const card = button(
+                    `S${revision.scene} · ${revision.revision.slice(0, 8)}`,
+                    revision.prompt_preview || revision.scene_id,
+                    () => selectRevision(revision), "h3cm-revision",
+                );
+                if (sharedCount > 1) {
+                    card.classList.add("h3cm-revision-shared");
+                    card.dataset.sharedKey = key;
+                    card.style.setProperty("--h3cm-shared-color", sharedColor(key));
+                    card.append(element(
+                        "span", "h3cm-shared-label",
+                        `shared ×${sharedCount}`,
+                    ));
+                }
+                card.append(element("small", "", `${revision.active ? "active" : "inactive"}${revision.ready ? "" : " · broken"}`));
+                if (state.selected?.scene === revision.scene && state.selected?.revision === revision.revision) {
+                    card.classList.add("h3cm-revision-selected");
+                }
+                path.append(card);
+            });
+            row.append(header, path);
+            branches.append(row);
+            path.addEventListener("scroll", scheduleSharedLinks, {passive:true});
+        }
+        scheduleSharedLinks();
+    }
+
+    function drawSharedLinks() {
+        branches.querySelector(".h3cm-shared-links")?.remove();
+        const cards = [...branches.querySelectorAll("[data-shared-key]")];
+        if (!cards.length) return;
+        const bounds = branches.getBoundingClientRect();
+        const width = Math.max(1, branches.scrollWidth);
+        const height = Math.max(1, branches.scrollHeight);
+        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        svg.classList.add("h3cm-shared-links");
+        svg.setAttribute("width", String(width));
+        svg.setAttribute("height", String(height));
+        svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+        svg.setAttribute("aria-hidden", "true");
+        const grouped = new Map();
+        for (const card of cards) {
+            const key = card.dataset.sharedKey;
+            if (!grouped.has(key)) grouped.set(key, []);
+            grouped.get(key).push(card);
+        }
+        for (const [key, members] of grouped) {
+            members.sort((left, right) =>
+                left.getBoundingClientRect().top - right.getBoundingClientRect().top);
+            for (let index = 1; index < members.length; index += 1) {
+                const previous = members[index - 1].getBoundingClientRect();
+                const current = members[index].getBoundingClientRect();
+                const x1 = previous.left + previous.width / 2 - bounds.left;
+                const y1 = previous.bottom - bounds.top;
+                const x2 = current.left + current.width / 2 - bounds.left;
+                const y2 = current.top - bounds.top;
+                const middle = y1 + (y2 - y1) / 2;
+                const link = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                link.classList.add("h3cm-shared-link");
+                link.setAttribute("stroke", sharedColor(key));
+                link.setAttribute("d", `M ${x1} ${y1} C ${x1} ${middle}, ${x2} ${middle}, ${x2} ${y2}`);
+                svg.append(link);
+            }
+        }
+        if (svg.childNodes.length) branches.prepend(svg);
+    }
+
+    function scheduleSharedLinks() {
+        if (state.sharedLinkFrame) window.cancelAnimationFrame(state.sharedLinkFrame);
+        state.sharedLinkFrame = window.requestAnimationFrame(() => {
+            state.sharedLinkFrame = 0;
+            drawSharedLinks();
+        });
+    }
+
+    function addInspector(label, value) {
+        inspector.append(element("dt", "", label), element("dd", "", value));
+    }
+
+    function renderDetail() {
+        inspector.replaceChildren();
+        const record = state.selected;
+        if (!record) {
+            preview.removeAttribute("src");
+            delete preview.dataset.source;
+            preview.load();
+            audio.hidden = true;
+            audio.removeAttribute("src");
+            delete audio.dataset.source;
+            prompt.textContent = "Select a revision from the branch graph.";
+            return;
+        }
+        const media = record.preview_video ?? record.video;
+        const nextVideo = videoUrl(media);
+        if (nextVideo && preview.dataset.source !== nextVideo) {
+            preview.src = nextVideo;
+            preview.dataset.source = nextVideo;
+            preview.load();
+        } else if (!nextVideo) {
+            preview.removeAttribute("src");
+            delete preview.dataset.source;
+            preview.load();
+        }
+        const audioUrl = videoUrl(record.audio);
+        audio.hidden = !audioUrl;
+        if (audioUrl && audio.dataset.source !== audioUrl) {
+            audio.src = audioUrl;
+            audio.dataset.source = audioUrl;
+            audio.load();
+        } else if (!audioUrl) {
+            audio.removeAttribute("src");
+            delete audio.dataset.source;
+        }
+        addInspector("Identity", `Scene ${record.scene} · ${record.scene_id} · ${record.revision}`);
+        addInspector("State", `${record.active ? "Active" : "Inactive"} · ${record.ready ? "Ready" : "Broken"}`);
+        addInspector("Branches", (record.branches ?? []).map((item) => item.label).join(", ") || "Unresolved lineage");
+        addInspector("Created", localTime(record.created_at));
+        addInspector("Frames", `${record.raw_frames} raw · ${record.delivered_frames} delivered`);
+        addInspector("Sampling", `seed ${record.seed || "unknown"} · ${record.steps || "?"} steps`);
+        addInspector("Incoming", `${record.continuation_mode} · Video ${record.context_length}f · Audio ${record.audio_context_length}f`);
+        addInspector("Parent", record.parent ? `Scene ${record.parent.scene} · ${record.parent.revision.slice(0, 8)}` : record.lineage_status);
+        addInspector("Following", (record.children ?? []).length
+            ? record.children.map(checkpointDependencyText).join(" · ") : "No dependent revision");
+        addInspector("Storage", `${formatCheckpointBytes(record.size_bytes)} · ${(record.missing_files ?? []).length ? `missing ${record.missing_files.join(", ")}` : "complete"}`);
+        const compatibility = record.compatibility ?? {};
+        addInspector("Canvas", compatibility.width && compatibility.height
+            ? `${compatibility.width}×${compatibility.height} @ ${compatibility.fps ?? 24} fps` : "Unknown");
+        addInspector("Audio mode", compatibility.audio_mode ?? "Unknown");
+        addInspector("Encoding", [compatibility.encode_mode, compatibility.anchor_mode,
+            compatibility.crop].filter(Boolean).join(" · ") || "Unknown");
+        addInspector("Metadata", record.metadata_path ?? "Unknown");
+        prompt.textContent = record.prompt || record.prompt_preview || "No saved scene prompt.";
+    }
+
+    function renderDeletion() {
+        deletionBody.replaceChildren();
+        deletion.classList.toggle("h3cm-delete-blocked", Boolean(state.deletion && !state.deletion.allowed));
+        deletionTitle.textContent = checkpointDeletionTitle(state.deletion);
+        remove.disabled = state.busy || !state.deletion?.allowed;
+        if (!state.deletion) return;
+        const files = (state.deletion.files ?? []).filter((item) => item.exists);
+        if (files.length) {
+            const list = element("ul", "h3cm-files");
+            for (const file of files) {
+                list.append(element("li", file.shared ? "h3cm-muted" : "",
+                    `${file.label} · ${formatCheckpointBytes(file.size_bytes)} · ${file.path}` +
+                    `${file.shared ? " · shared, kept" : ""}`));
+            }
+            deletionBody.append(list);
+        }
+        if (state.deletion.dependents?.length) {
+            const heading = element("div", "h3cm-error", "Delete dependent leaves first:");
+            const list = element("ul", "h3cm-dependents");
+            for (const dependent of state.deletion.dependents) {
+                const action = dependent.leaf
+                    ? (dependent.active
+                        ? " · active leaf: restore another revision first"
+                        : " · leaf: delete this first")
+                    : "";
+                const item = element("li", "h3cm-dependent",
+                    `${checkpointDependencyText(dependent)}${action}`);
+                item.title = dependent.leaf && !dependent.active
+                    ? "Select this deletable leaf checkpoint"
+                    : "Select this dependent checkpoint to inspect its own descendants";
+                item.addEventListener("click", () => {
+                    const revision = selectedCheckpointRevision(
+                        state.payload, dependent.scene, dependent.revision);
+                    if (revision) selectRevision(revision);
+                });
+                list.append(item);
+            }
+            deletionBody.append(heading, list);
+        }
+        if (state.deletion.not_deleted?.length) {
+            const kept = element("details", "h3cm-muted");
+            kept.append(element("summary", "", "Always kept by this deletion"));
+            const list = element("ul", "h3cm-files");
+            for (const label of state.deletion.not_deleted) {
+                list.append(element("li", "", label));
+            }
+            kept.append(list);
+            deletionBody.append(kept);
+        }
+    }
+
+    function render() {
+        const total = state.payload?.summary;
+        summary.textContent = total
+            ? `${total.scene_count} scenes · ${total.revision_count} revisions · ${total.branch_count} branches · ${formatCheckpointBytes(total.bytes)}`
+            : "Select a saved run";
+        renderScenes();
+        renderBranches();
+        renderDetail();
+        renderDeletion();
+    }
+
+    async function refreshDeletionPreview() {
+        const record = state.selected;
+        const token = ++state.requestToken;
+        if (!record || !state.runName) return;
+        deletionTitle.textContent = "Inspecting owned files and dependencies…";
+        remove.disabled = true;
+        try {
+            const payload = await jsonRequest(
+                "/minimax_h3_context_loop/checkpoint-revisions/delete-preview", {
+                    method:"POST", headers:{"Content-Type":"application/json"},
+                    body:JSON.stringify({run_name:state.runName, scene:record.scene, revision:record.revision}),
+                });
+            if (token !== state.requestToken) return;
+            state.deletion = payload;
+            status.textContent = "";
+        } catch (error) {
+            if (token !== state.requestToken) return;
+            state.deletion = null;
+            status.className = "h3cm-status h3cm-error";
+            status.textContent = error.message;
+        }
+        renderDeletion();
+    }
+
+    async function refreshCheckpoints() {
+        if (!state.runName) {
+            state.payload = null;
+            selectRevision(null, false);
+            return;
+        }
+        setBusy(true, "Scanning checkpoint metadata…");
+        try {
+            const query = new URLSearchParams({run_name:state.runName});
+            state.payload = await jsonRequest(`/minimax_h3_context_loop/checkpoints?${query}`);
+            const selected = selectedCheckpointRevision(
+                state.payload, state.scene, state.revision);
+            status.className = "h3cm-status";
+            status.textContent = state.payload.summary?.broken_count
+                ? `${state.payload.summary.broken_count} broken revision${state.payload.summary.broken_count === 1 ? "" : "s"} found`
+                : "Checkpoint graph is current";
+            selectRevision(selected, false);
+            if (selected) void refreshDeletionPreview();
+        } catch (error) {
+            state.payload = null;
+            state.selected = null;
+            state.deletion = null;
+            status.className = "h3cm-status h3cm-error";
+            status.textContent = error.message;
+            render();
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    async function refreshRuns() {
+        setBusy(true, "Scanning output/h3_chains…");
+        try {
+            const payload = await jsonRequest("/minimax_h3_context_loop/runs");
+            state.runs = payload.runs ?? [];
+            const connected = activePlanRun();
+            const preferred = state.runName || connected;
+            state.runName = state.runs.some((item) => item.run_name === preferred)
+                ? preferred : state.runs[0]?.run_name ?? "";
+            runSelect.replaceChildren();
+            for (const run of state.runs) {
+                const option = element("option", "", `${run.run_name} · ${run.checkpoint_count} active checkpoints`);
+                option.value = run.run_name;
+                runSelect.append(option);
+            }
+            runSelect.value = state.runName;
+            persistSelection();
+        } catch (error) {
+            state.runs = [];
+            state.runName = "";
+            runSelect.replaceChildren();
+            status.className = "h3cm-status h3cm-error";
+            status.textContent = error.message;
+        } finally {
+            setBusy(false);
+        }
+        await refreshCheckpoints();
+    }
+
+    async function openFolder() {
+        if (!state.runName) return;
+        setBusy(true, "Opening run folder…");
+        try {
+            const payload = await jsonRequest("/minimax_h3_context_loop/open-run-folder", {
+                method:"POST", headers:{"Content-Type":"application/json"},
+                body:JSON.stringify({run_name:state.runName}),
+            });
+            status.textContent = payload.opened ? "Opened on ComfyUI host" : payload.path;
+        } catch (error) {
+            status.className = "h3cm-status h3cm-error";
+            status.textContent = error.message;
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    async function deleteSelected() {
+        const record = state.selected;
+        const plan = state.deletion;
+        if (!record || !plan?.allowed || state.busy) return;
+        const confirmed = window.confirm(
+            `Permanently delete scene ${record.scene} revision ${record.revision.slice(0, 8)}?\n\n` +
+            `${plan.owned_file_count} owned files · ${formatCheckpointBytes(plan.reclaimed_bytes)}\n` +
+            "Run archives, references, prompt history, and assembled exports are kept. This cannot be undone.",
+        );
+        if (!confirmed) return;
+        setBusy(true, "Deleting staged revision files…");
+        try {
+            const payload = await jsonRequest(
+                "/minimax_h3_context_loop/checkpoint-revisions/delete", {
+                    method:"POST", headers:{"Content-Type":"application/json"},
+                    body:JSON.stringify({run_name:state.runName, scene:record.scene,
+                        revision:record.revision, snapshot:plan.snapshot}),
+                });
+            state.revision = "";
+            await refreshCheckpoints();
+            status.className = "h3cm-status";
+            status.textContent = `${payload.message} Reclaimed ${formatCheckpointBytes(payload.reclaimed_bytes)}.`;
+        } catch (error) {
+            state.deletion = error.payload?.preview ?? state.deletion;
+            status.className = "h3cm-status h3cm-error";
+            status.textContent = error.message;
+            renderDeletion();
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    runSelect.addEventListener("change", () => {
+        state.runName = runSelect.value;
+        state.scene = null;
+        state.revision = "";
+        persistSelection();
+        void refreshCheckpoints();
+    });
+
+    const domWidget = node.addDOMWidget("h3_checkpoint_manager", "h3-checkpoint-manager", root, {
+        serialize:false, hideOnZoom:false, getMinHeight:() => 620,
+    });
+    domWidget.serialize = false;
+    node.setSize?.([
+        Math.max(Number(node.size?.[0]) || 0, 900),
+        Math.max(Number(node.size?.[1]) || 0, 760),
+    ]);
+    const connectionsChanged = node.onConnectionsChange;
+    node.onConnectionsChange = function () {
+        const result = connectionsChanged?.apply(this, arguments);
+        window.setTimeout(() => {
+            const connected = activePlanRun();
+            if (connected && connected !== state.runName) {
+                state.runName = connected;
+                void refreshRuns();
+            }
+        }, 0);
+        return result;
+    };
+    node._h3CheckpointManagerRefresh = () => void refreshRuns();
+    const sharedLinksResizeObserver = typeof ResizeObserver === "function"
+        ? new ResizeObserver(scheduleSharedLinks) : null;
+    sharedLinksResizeObserver?.observe(branchesPanel);
+    const removed = node.onRemoved;
+    node.onRemoved = function () {
+        if (state.sharedLinkFrame) window.cancelAnimationFrame(state.sharedLinkFrame);
+        sharedLinksResizeObserver?.disconnect();
+        return removed?.apply(this, arguments);
+    };
+    void refreshRuns();
+}
+
+app.registerExtension({
+    name:"minimax_h3_context_loop.checkpoint_manager",
+    async beforeRegisterNodeDef(nodeTypeClass, nodeData) {
+        if (nodeData.name !== NODE_NAME) return;
+        const created = nodeTypeClass.prototype.onNodeCreated;
+        nodeTypeClass.prototype.onNodeCreated = function () {
+            const result = created?.apply(this, arguments);
+            window.setTimeout(() => mount(this), 0);
+            return result;
+        };
+        const configured = nodeTypeClass.prototype.onConfigure;
+        nodeTypeClass.prototype.onConfigure = function () {
+            const result = configured?.apply(this, arguments);
+            window.setTimeout(() => this._h3CheckpointManagerRefresh?.(), 0);
+            return result;
+        };
+    },
+    async nodeCreated(node) {
+        if (nodeType(node) === NODE_NAME) mount(node);
+    },
+});

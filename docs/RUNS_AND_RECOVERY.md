@@ -67,12 +67,42 @@ an MP4 copied from `segments/` or `reviews/` alone cannot recreate the saved AV
 latent. When only video survives, use Existing Video Context as a re-encoded
 continuation instead.
 
-Inactive revisions can be deleted from the same panel to reclaim space. The
-confirmation names the exact scene, short revision id, owned artifact types,
-and estimated size. Active revisions cannot be deleted. Cleanup is limited to
-that revision's segment, safetensors checkpoint, prompt/audio/blend sidecars,
-preview, and versioned metadata; Plan archives, assets, and other revisions are
-never included.
+Inactive leaf revisions can be deleted from the same panel to reclaim space.
+Review Gate now retrieves a fresh server-side deletion preview before asking
+for confirmation. Active revisions and revisions with dependent later scenes
+cannot be deleted. Cleanup is limited to that revision's segment, safetensors
+checkpoint, prompt/audio/blend sidecars, unshared preview, and versioned
+metadata; Plan archives, assets, prompt history, assembled exports, and other
+revisions are never included.
+
+## Checkpoint Manager
+
+Connect the active Plan output to **MiniMax H3 Checkpoint Manager**. It passes
+the Plan through unchanged and never pauses execution, so it can stay between
+Plan and the next consumer. The connected Plan preselects its run; the run
+selector can inspect any other folder under `output/h3_chains`.
+
+The manager groups immutable scene revisions into inferred branches. A revision
+can appear in more than one branch when it is their shared ancestor. Selecting
+a revision shows its saved preview, prompt, seed, timing, canvas, storage,
+parent, following scenes, and the exact video/audio frame context those
+following scenes consume. Older checkpoints derive this graph from predecessor
+revision and checkpoint hashes; newly saved checkpoints also carry a stable
+branch id and effective context fields.
+
+Deletion is deliberately one scene revision at a time:
+
+1. Select an inactive revision.
+2. Inspect its complete file list, estimated reclaimed size, and preserved
+   categories.
+3. If later revisions depend on it, select and delete those leaf revisions
+   first.
+4. Confirm the now-safe leaf deletion. If anything changed after the preview,
+   the server refuses it and asks for a fresh preview.
+
+This first release does not bulk-delete branches. The leaf-first workflow makes
+the exact context consequences visible and avoids silently orphaning later
+checkpoints.
 
 ## Run Manager
 

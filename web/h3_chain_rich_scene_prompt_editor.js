@@ -6,16 +6,16 @@ import {
     promptTextToLines,
     promptValueToText,
     sharedPrompt,
-} from "./h3_chain_plan_core.mjs?v=0.4.13";
+} from "./h3_chain_plan_core.mjs?v=0.4.17";
 import {
     buildPromptAssistantContext,
     makePromptAssistRequest,
-} from "./h3_prompt_assistant_core.mjs?v=0.4.13";
-import {PromptAssistantClient} from "./h3_prompt_assistant_client.mjs?v=0.4.13";
+} from "./h3_prompt_assistant_core.mjs?v=0.4.17";
+import {PromptAssistantClient} from "./h3_prompt_assistant_client.mjs?v=0.4.17";
 import {
     directOptimizerConfigurationError,
     makeDirectPromptOptimizeRequest,
-} from "./h3_prompt_optimizer_core.mjs?v=0.4.13";
+} from "./h3_prompt_optimizer_core.mjs?v=0.4.17";
 import {
     openPromptOptimizerSettings,
     promptOptimizerBackend,
@@ -25,17 +25,19 @@ import {
 import {
     promptRevisionLabel,
     promptRevisionNavigation,
-} from "./h3_prompt_history_core.mjs?v=0.4.13";
-import {availableReferenceRecords} from "./h3_reference_preview_core.mjs?v=0.4.13";
+} from "./h3_prompt_history_core.mjs?v=0.4.17";
+import {availableReferenceRecords} from "./h3_reference_preview_core.mjs?v=0.4.17";
 import {
+    PromptUndoHistory,
     RICH_PROMPT_GUIDES,
     normalizeRichGuide,
     optimizerSource,
+    promptUndoDirection,
     richGenerationMode,
     richGuideInstruction,
     tokenizeRichPrompt,
-} from "./h3_rich_prompt_editor_core.mjs?v=0.4.13";
-import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.4.13";
+} from "./h3_rich_prompt_editor_core.mjs?v=0.4.17";
+import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.4.17";
 
 const {publishCompanionScene, rebaseScenePrompt} = promptCompanionSync;
 function publishCompanionPrompt(...args) {
@@ -75,7 +77,16 @@ function injectStyles() {
         --h3rp-panel:color-mix(in srgb,var(--comfy-input-bg,#111827) 86%,#26334d);
         --h3rp-border:color-mix(in srgb,var(--border-color,#555) 70%,#7591bd);
         --h3rp-text:var(--input-text,#edf2fa); --h3rp-muted:color-mix(in srgb,var(--h3rp-text) 57%,transparent);
-        --h3rp-accent:#8eb5ff; --h3rp-font-size:17px; box-sizing:border-box; width:100%; height:100%;
+        /* Theme-aware semantic colors remain pastel on dark ComfyUI themes
+           and gain enough foreground contrast on light themes. */
+        --h3rp-accent:color-mix(in srgb,var(--h3rp-text) 38%,#4f83ff);
+        --h3rp-token-picture:color-mix(in srgb,var(--h3rp-text) 42%,#139be8);
+        --h3rp-token-video:color-mix(in srgb,var(--h3rp-text) 42%,#9355d6);
+        --h3rp-token-audio:color-mix(in srgb,var(--h3rp-text) 42%,#d47700);
+        --h3rp-token-subject:color-mix(in srgb,var(--h3rp-text) 42%,#26934a);
+        --h3rp-token-dialogue:color-mix(in srgb,var(--h3rp-text) 42%,#cf3976);
+        --h3rp-token-danger:color-mix(in srgb,var(--h3rp-text) 42%,#d44747);
+        --h3rp-font-size:17px; box-sizing:border-box; width:100%; height:100%;
         min-height:560px; display:flex; flex-direction:column; gap:8px; overflow:hidden; padding:10px;
         border:1px solid var(--h3rp-border); border-radius:9px; background:var(--h3rp-bg);
         color:var(--h3rp-text); font:12px/1.35 system-ui,sans-serif; }
@@ -107,13 +118,14 @@ function injectStyles() {
       .h3rp-editor[contenteditable="false"] { opacity:.68; cursor:wait; }
       .h3rp-token { display:inline-flex; align-items:center; gap:3px; max-width:320px; margin:0 1px;
         padding:1px 4px 1px 2px; border:1px solid currentColor; border-radius:5px; vertical-align:1px;
-        line-height:1.25; cursor:pointer; user-select:all; }
-      .h3rp-token-picture { color:#76c7ff; background:rgba(55,145,205,.14); }
-      .h3rp-token-video { color:#c7a0ff; background:rgba(133,82,195,.15); }
-      .h3rp-token-audio { color:#ffbd72; background:rgba(205,124,45,.14); }
-      .h3rp-token-subject { color:#8ed7a4; background:rgba(64,155,92,.14); }
-      .h3rp-token-dialogue { color:#ff9fc7; background:rgba(190,63,119,.13); }
-      .h3rp-token-unknown,.h3rp-token-inactive { color:#ff9999; border-style:dashed; background:rgba(185,56,56,.12); }
+        line-height:1.25; cursor:pointer; user-select:all;
+        background:color-mix(in srgb,currentColor 14%,transparent); }
+      .h3rp-token-picture { color:var(--h3rp-token-picture); }
+      .h3rp-token-video { color:var(--h3rp-token-video); }
+      .h3rp-token-audio { color:var(--h3rp-token-audio); }
+      .h3rp-token-subject { color:var(--h3rp-token-subject); }
+      .h3rp-token-dialogue { color:var(--h3rp-token-dialogue); }
+      .h3rp-token-unknown,.h3rp-token-inactive { color:var(--h3rp-token-danger); border-style:dashed; }
       .h3rp-token-thumb { width:18px; height:18px; flex:0 0 18px; object-fit:cover; border-radius:3px;
         background:rgba(255,255,255,.09); }
       .h3rp-token-label { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -460,6 +472,7 @@ function mount(node) {
             saveTimer:null, pendingDraft:null, savePromise:null, error:""},
         optimizer:{client:null, preparing:false, requestId:null, meta:null, origins:new Map(), providers:null,
             abortController:null, activeBackend:null, error:"", message:"", pendingResult:null},
+        undoByScene:new Map(), promptUndo:null,
         popover:null, popoverTimer:null, pollTimer:null,
     };
     node._h3RichPromptState = state;
@@ -516,6 +529,35 @@ function mount(node) {
 
     function historySceneKey(runName, shotId) {
         return `${runName}\u0000${shotId}`;
+    }
+
+    function promptUndoForScene(shotId, text, {external = false} = {}) {
+        const key = historySceneKey(planRunName(), shotId);
+        let history = state.undoByScene.get(key);
+        if (!history) {
+            history = new PromptUndoHistory(text);
+            state.undoByScene.set(key, history);
+        } else if (external) {
+            // Plan Studio republishes the active prompt after non-prompt edits.
+            // Preserve undo when that synchronized text did not actually change.
+            history.align(text);
+        } else {
+            history.align(text);
+        }
+        return history;
+    }
+
+    function recordPromptReplacement(sceneIndex, shot, text) {
+        const shotId = String(
+            shot?.id || `clip_${String(sceneIndex + 1).padStart(4, "0")}`,
+        );
+        const current = promptValueToText(
+            shot?.prompt, `Scene ${sceneIndex + 1} prompt`,
+        );
+        const history = promptUndoForScene(shotId, current);
+        history.record(text, {inputType:"insertReplacementText"});
+        if (sceneIndex === state.active) state.promptUndo = history;
+        return history;
     }
 
     async function historyRequest(query = {}, body = null) {
@@ -637,6 +679,7 @@ function mount(node) {
             state.history.data = payload.history;
             state.history.revisionId = payload.revision.id;
             const text = String(payload.revision.prompt ?? "");
+            recordPromptReplacement(state.active, shot, text);
             shot.prompt = promptTextToLines(text);
             renderEditorText(text);
             writePlan("Loaded prompt version");
@@ -751,18 +794,19 @@ function mount(node) {
         if (caret != null) restoreCaret(state.editor, caret);
     }
 
-    function saveEditorInput() {
+    function saveEditorInput(event) {
         const shot = state.plan?.shots?.[state.active];
         if (!shot || !state.editor) return;
         const shotId = String(shot.id || `clip_${String(state.active + 1).padStart(4, "0")}`);
         const text = editorPlainText(state.editor);
+        state.promptUndo?.record(text, {inputType:event?.inputType});
         shot.prompt = promptTextToLines(text);
         writePlan();
         scheduleHistoryDraft(shotId, text);
-        // Keep the browser's live DOM and undo transaction intact while the
-        // user types. Existing chips remain atomic; newly typed raw labels are
-        // decorated on blur. Explicit toolbar/menu insertions decorate once
-        // immediately after their own input transaction.
+        // Keep the browser's live DOM intact while the user types. Existing
+        // chips remain atomic; newly typed raw labels are decorated on blur.
+        // The shared text-level undo survives later tag decoration and
+        // programmatic toolbar/menu insertions.
     }
 
     function decorateEditorAtCaret() {
@@ -900,6 +944,7 @@ function mount(node) {
                     state.optimizer.pendingResult = {...meta, result};
                     state.optimizer.error = "The scene changed while optimizing; the result was not applied.";
                 } else {
+                    recordPromptReplacement(meta.sceneIndex, shot, result);
                     shot.prompt = promptTextToLines(result);
                     state.optimizer.origins.set(meta.sceneKey, {source:meta.source, result});
                     writePlan("Optimized prompt saved to Plan");
@@ -943,6 +988,7 @@ function mount(node) {
             refreshOptimizerUi();
             return;
         }
+        recordPromptReplacement(pending.sceneIndex, shot, pending.result);
         shot.prompt = promptTextToLines(pending.result);
         state.optimizer.origins.set(pending.sceneKey, {source:pending.source, result:pending.result});
         state.optimizer.pendingResult = null;
@@ -993,6 +1039,7 @@ function mount(node) {
             state.optimizer.error = "The scene changed while optimizing; the result was not applied.";
             return;
         }
+        recordPromptReplacement(meta.sceneIndex, shot, result);
         shot.prompt = promptTextToLines(result);
         state.optimizer.origins.set(meta.sceneKey, {source:meta.source, result});
         writePlan("Optimized prompt saved to Plan");
@@ -1263,7 +1310,11 @@ function mount(node) {
         editor.setAttribute("aria-multiline", "true");
         editor.dataset.placeholder = "Write this scene's action, camera, performance, dialogue, sound, and ending continuity…";
         state.editor = editor;
-        renderEditorText(promptValueToText(shot.prompt, `Scene ${state.active + 1} prompt`));
+        const initialPrompt = promptValueToText(
+            shot.prompt, `Scene ${state.active + 1} prompt`,
+        );
+        state.promptUndo = promptUndoForScene(shotId, initialPrompt);
+        renderEditorText(initialPrompt);
         editor.addEventListener("input", saveEditorInput);
         editor.addEventListener("beforeinput", (event) => {
             if (event.inputType === "insertParagraph" || event.inputType === "insertLineBreak") {
@@ -1275,8 +1326,23 @@ function mount(node) {
         });
         editor.addEventListener("copy", (event) => copyEditorSelection(editor, event));
         editor.addEventListener("cut", (event) => copyEditorSelection(editor, event, true));
+        const applyPromptUndo = (direction) => {
+            const text = state.promptUndo?.[direction]?.();
+            if (text == null) return false;
+            const caret = selectionTextOffset(editor);
+            renderEditorText(text, Math.min(caret, text.length));
+            shot.prompt = promptTextToLines(text);
+            writePlan(direction === "undo" ? "Undo saved to Plan" : "Redo saved to Plan");
+            scheduleHistoryDraft(shotId, text);
+            editor.focus();
+            return true;
+        };
         editor.addEventListener("keydown", (event) => {
-            if (event.altKey && event.key === "ArrowLeft") event.preventDefault(), navigate(-1);
+            const undoDirection = promptUndoDirection(event);
+            if (undoDirection) {
+                event.preventDefault();
+                applyPromptUndo(undoDirection);
+            } else if (event.altKey && event.key === "ArrowLeft") event.preventDefault(), navigate(-1);
             else if (event.altKey && event.key === "ArrowRight") event.preventDefault(), navigate(1);
             else if (!event.ctrlKey && !event.metaKey && !event.altKey && event.key === "@"
                     && state.records.some((record) => record.active)) {
@@ -1401,6 +1467,12 @@ function mount(node) {
     node._h3PromptCompanionSetScenePrompt = (planNode, index, text) => {
         if (planNode !== state.planNode || !state.plan?.shots?.[index]) return false;
         state.plan.shots[index].prompt = promptTextToLines(text);
+        const shotId = String(
+            state.plan.shots[index].id
+            || `clip_${String(index + 1).padStart(4, "0")}`,
+        );
+        const promptUndo = promptUndoForScene(shotId, text, {external:true});
+        if (index === state.active) state.promptUndo = promptUndo;
         if (index === state.active && state.editor) {
             const current = editorPlainText(state.editor);
             if (current !== text) {

@@ -8,7 +8,7 @@ import {
     promptTextToLines,
     promptValueToText,
     sharedPrompt,
-} from "./h3_chain_plan_core.mjs?v=0.4.13";
+} from "./h3_chain_plan_core.mjs?v=0.4.17";
 import {
     PROMPT_ASSIST_DEFAULT_INSTRUCTIONS,
     PROMPT_ASSIST_MODES,
@@ -17,15 +17,19 @@ import {
     makePromptAssistRequest,
     promptSceneKey,
     promptSourceRevision,
-} from "./h3_prompt_assistant_core.mjs?v=0.4.13";
-import {PromptAssistantClient} from "./h3_prompt_assistant_client.mjs?v=0.4.13";
+} from "./h3_prompt_assistant_core.mjs?v=0.4.17";
+import {PromptAssistantClient} from "./h3_prompt_assistant_client.mjs?v=0.4.17";
 import {
     promptRevisionLabel,
     promptRevisionNavigation,
-} from "./h3_prompt_history_core.mjs?v=0.4.13";
-import {availableReferenceRecords} from "./h3_reference_preview_core.mjs?v=0.4.13";
-import {tokenizeRichPrompt} from "./h3_rich_prompt_editor_core.mjs?v=0.4.13";
-import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.4.13";
+} from "./h3_prompt_history_core.mjs?v=0.4.17";
+import {availableReferenceRecords} from "./h3_reference_preview_core.mjs?v=0.4.17";
+import {
+    PromptUndoHistory,
+    promptUndoDirection,
+    tokenizeRichPrompt,
+} from "./h3_rich_prompt_editor_core.mjs?v=0.4.17";
+import * as promptCompanionSync from "./h3_prompt_companion_sync.mjs?v=0.4.17";
 
 const {publishCompanionScene, rebaseScenePrompt} = promptCompanionSync;
 function publishCompanionPrompt(...args) {
@@ -70,7 +74,16 @@ function injectStyles() {
             --h3sp-border: color-mix(in srgb, var(--border-color, #555) 68%, #7891bf);
             --h3sp-text: var(--input-text, #eef1f7);
             --h3sp-muted: color-mix(in srgb, var(--h3sp-text) 58%, transparent);
-            --h3sp-accent: #84aaff;
+            /* Blend semantic foregrounds with the active ComfyUI text color.
+               This keeps the pastel identity in dark themes and makes the
+               same controls dark enough to read in light themes. */
+            --h3sp-accent: color-mix(in srgb, var(--h3sp-text) 38%, #4f83ff);
+            --h3sp-token-picture: color-mix(in srgb, var(--h3sp-text) 42%, #139be8);
+            --h3sp-token-video: color-mix(in srgb, var(--h3sp-text) 42%, #9355d6);
+            --h3sp-token-audio: color-mix(in srgb, var(--h3sp-text) 42%, #d47700);
+            --h3sp-token-subject: color-mix(in srgb, var(--h3sp-text) 42%, #26934a);
+            --h3sp-token-dialogue: color-mix(in srgb, var(--h3sp-text) 42%, #cf3976);
+            --h3sp-token-danger: color-mix(in srgb, var(--h3sp-text) 42%, #d44747);
             --h3sp-font-size: 18px;
             box-sizing:border-box; width:100%; height:100%; min-height:420px;
             display:flex; flex-direction:column; gap:8px; overflow:hidden; padding:10px;
@@ -120,14 +133,14 @@ function injectStyles() {
         .h3sp-token { display:inline-flex; align-items:center; gap:3px; max-width:320px;
             margin:0 1px; padding:1px 4px 1px 2px; border:1px solid currentColor;
             border-radius:5px; vertical-align:1px; line-height:1.25; cursor:pointer;
-            user-select:all; }
-        .h3sp-token-picture { color:#76c7ff; background:rgba(55,145,205,.14); }
-        .h3sp-token-video { color:#c7a0ff; background:rgba(133,82,195,.15); }
-        .h3sp-token-audio { color:#ffbd72; background:rgba(205,124,45,.14); }
-        .h3sp-token-subject { color:#8ed7a4; background:rgba(64,155,92,.14); }
-        .h3sp-token-dialogue { color:#ff9fc7; background:rgba(190,63,119,.13); }
-        .h3sp-token-unknown, .h3sp-token-inactive { color:#ff9999;
-            border-style:dashed; background:rgba(185,56,56,.12); }
+            user-select:all; background:color-mix(in srgb,currentColor 14%,transparent); }
+        .h3sp-token-picture { color:var(--h3sp-token-picture); }
+        .h3sp-token-video { color:var(--h3sp-token-video); }
+        .h3sp-token-audio { color:var(--h3sp-token-audio); }
+        .h3sp-token-subject { color:var(--h3sp-token-subject); }
+        .h3sp-token-dialogue { color:var(--h3sp-token-dialogue); }
+        .h3sp-token-unknown, .h3sp-token-inactive { color:var(--h3sp-token-danger);
+            border-style:dashed; }
         .h3sp-token-icon { width:16px; height:16px; display:inline-flex;
             flex:0 0 16px; color:currentColor; }
         .h3sp-token-icon svg { width:100%; height:100%; fill:none; stroke:currentColor;
@@ -615,6 +628,9 @@ function mount(node) {
             savePromise: null,
             error: "",
         },
+        undoByScene: new Map(),
+        promptUndo: null,
+        richInputType: "",
         pollTimer: null,
     };
     node._h3ScenePromptEditorState = state;
@@ -703,6 +719,22 @@ function mount(node) {
 
     function historySceneKey(runName, shotId) {
         return `${runName}\u0000${shotId}`;
+    }
+
+    function promptUndoForScene(shotId, text, {external = false} = {}) {
+        const key = historySceneKey(planRunName(), shotId);
+        let history = state.undoByScene.get(key);
+        if (!history) {
+            history = new PromptUndoHistory(text);
+            state.undoByScene.set(key, history);
+        } else if (external) {
+            // Plan Studio republishes the active prompt after non-prompt edits.
+            // Preserve undo when that synchronized text did not actually change.
+            history.align(text);
+        } else {
+            history.align(text);
+        }
+        return history;
     }
 
     async function historyRequest(query = {}, body = null) {
@@ -885,6 +917,9 @@ function mount(node) {
             history.revisionId = payload.revision.id;
             history.error = "";
             history.textarea.value = String(payload.revision.prompt ?? "");
+            state.promptUndo?.record(history.textarea.value, {
+                inputType: "insertReplacementText",
+            });
             renderRichEditorText(history.textarea.value);
             shot.prompt = promptTextToLines(history.textarea.value);
             writePlan(history.status);
@@ -1763,6 +1798,7 @@ function mount(node) {
         textarea.title = "This is the actual active scene prompt in the connected H3 Chain Plan.";
         textarea.classList.toggle("h3sp-hidden", state.decorated);
         state.promptTextarea = textarea;
+        state.promptUndo = promptUndoForScene(shotId, textarea.value);
 
         const {records} = availableReferenceRecords(
             node, state.active + 1, {prompt: [
@@ -1826,7 +1862,36 @@ function mount(node) {
         state.history.textarea = textarea;
         state.history.status = status;
 
-        textarea.addEventListener("input", () => {
+        const applyPromptUndo = (direction, target) => {
+            const text = state.promptUndo?.[direction]?.();
+            if (text == null) return false;
+            const richCaret = target === richEditor
+                ? selectionTextOffset(richEditor) : null;
+            textarea.value = text;
+            shot.prompt = promptTextToLines(text);
+            writePlan(status);
+            scheduleHistoryDraft(shotId, text);
+            renderRichEditorText(
+                text,
+                richCaret == null ? null : Math.min(richCaret, text.length),
+            );
+            if (target === textarea) textarea.setSelectionRange(text.length, text.length);
+            target.focus();
+            refreshAssistant();
+            return true;
+        };
+        const handlePromptUndo = (event, target) => {
+            const direction = promptUndoDirection(event);
+            if (!direction) return false;
+            event.preventDefault();
+            applyPromptUndo(direction, target);
+            return true;
+        };
+
+        textarea.addEventListener("input", (event) => {
+            state.promptUndo?.record(textarea.value, {
+                inputType:event.inputType || state.richInputType,
+            });
             shot.prompt = promptTextToLines(textarea.value);
             writePlan(status);
             scheduleHistoryDraft(shotId, textarea.value);
@@ -1834,7 +1899,9 @@ function mount(node) {
             refreshAssistant();
         });
         textarea.addEventListener("keydown", (event) => {
-            if (event.altKey && event.key === "ArrowLeft") {
+            if (handlePromptUndo(event, textarea)) {
+                return;
+            } else if (event.altKey && event.key === "ArrowLeft") {
                 event.preventDefault();
                 navigate(-1);
             } else if (event.altKey && event.key === "ArrowRight") {
@@ -1851,9 +1918,14 @@ function mount(node) {
             }
         });
 
-        richEditor.addEventListener("input", () => {
-            textarea.value = editorPlainText(richEditor);
-            textarea.dispatchEvent(new Event("input", {bubbles: true}));
+        richEditor.addEventListener("input", (event) => {
+            state.richInputType = event.inputType || "";
+            try {
+                textarea.value = editorPlainText(richEditor);
+                textarea.dispatchEvent(new Event("input", {bubbles: true}));
+            } finally {
+                state.richInputType = "";
+            }
         });
         richEditor.addEventListener("beforeinput", (event) => {
             if (event.inputType === "insertParagraph" || event.inputType === "insertLineBreak") {
@@ -1868,7 +1940,9 @@ function mount(node) {
         richEditor.addEventListener("copy", (event) => copyEditorSelection(richEditor, event));
         richEditor.addEventListener("cut", (event) => copyEditorSelection(richEditor, event, true));
         richEditor.addEventListener("keydown", (event) => {
-            if (event.altKey && event.key === "ArrowLeft") {
+            if (handlePromptUndo(event, richEditor)) {
+                return;
+            } else if (event.altKey && event.key === "ArrowLeft") {
                 event.preventDefault();
                 navigate(-1);
             } else if (event.altKey && event.key === "ArrowRight") {
@@ -2005,6 +2079,12 @@ function mount(node) {
     node._h3PromptCompanionSetScenePrompt = (planNode, index, text) => {
         if (planNode !== state.planNode || !state.plan?.shots?.[index]) return false;
         state.plan.shots[index].prompt = promptTextToLines(text);
+        const shotId = String(
+            state.plan.shots[index].id
+            || `clip_${String(index + 1).padStart(4, "0")}`,
+        );
+        const promptUndo = promptUndoForScene(shotId, text, {external:true});
+        if (index === state.active) state.promptUndo = promptUndo;
         if (index === state.active) {
             const textarea = root.querySelector(".h3sp-textarea");
             if (textarea && textarea.value !== text) {

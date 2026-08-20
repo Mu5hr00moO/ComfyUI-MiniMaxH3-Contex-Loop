@@ -1,7 +1,7 @@
 [project]
 name = "comfyui-minimaxh3-contex-loop"
 description = "Recursive, checkpointed MiniMax H3 scene loops with motion/audio context, audiovisual review, resume, and final assembly for ComfyUI."
-version = "0.4.13"
+version = "0.4.17"
 license = { file = "LICENSE" }
 readme = "README.md"
 requires-python = ">=3.10"
