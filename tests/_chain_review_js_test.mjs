@@ -163,6 +163,12 @@ assert.match(
     "final approval must refresh checkpoint history",
 );
 assert.match(reviewSource, /Checkpoint history/);
+assert.match(reviewSource, /const refreshToken = \+\+resumeRefreshToken/);
+assert.match(reviewSource, /if \(refreshToken !== resumeRefreshToken\) return/);
+assert.match(reviewSource, /candidate_revision/);
+assert.match(reviewSource, /Use selected take & continue/);
+assert.match(reviewSource, /exact video and audio continuation tensors/);
+assert.match(reviewSource, /Candidate \$\{candidate\.number\}\/\$\{current\.candidate_count\}/);
 assert.match(
     reviewSource,
     /checkpointRevisionChain\(\s*checkpointRevisions, planClipCount \+ 1/,

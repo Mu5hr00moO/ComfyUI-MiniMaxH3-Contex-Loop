@@ -1,0 +1,1635 @@
+{
+  "last_node_id": 24,
+  "last_link_id": 37,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "MiniMaxH3ChainPlan",
+      "pos": [
+        -1850,
+        400
+      ],
+      "size": [
+        800,
+        680
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "plan",
+          "type": "H3_CHAIN_PLAN",
+          "links": [
+            1
+          ]
+        },
+        {
+          "name": "summary",
+          "type": "STRING",
+          "links": null
+        },
+        {
+          "name": "clip_count",
+          "type": "INT",
+          "links": null
+        },
+        {
+          "name": "width",
+          "type": "INT",
+          "links": null
+        },
+        {
+          "name": "height",
+          "type": "INT",
+          "links": null
+        },
+        {
+          "name": "video_blend_frames",
+          "type": "INT",
+          "links": null
+        }
+      ],
+      "title": "SOURCE PLAN — LOAD BRANCH IN MANAGER",
+      "properties": {
+        "cnr_id": "comfyui-minimaxh3-contex-loop",
+        "ver": "0.3.10",
+        "Node name for S&R": "MiniMaxH3ChainPlan",
+        "aux_id": "ethanfel/ComfyUI-MiniMaxH3-Contex-Loop",
+        "h3_chain_scene_colors": {},
+        "h3_chain_plan_layout": {
+          "promptHeights": {
+            "shared": 88,
+            "scene:confessional_opening": 112,
+            "scene:confessional_continuation": 112
+          }
+        }
+      },
+      "widgets_values": [
+        "{\"defaults\":{\"duration_seconds\":5,\"steps\":8},\"shots\":[{\"id\":\"load_a_saved_branch_first\",\"prompt\":\"Use Checkpoint Manager: load a complete saved branch before queueing.\",\"length\":124,\"seed\":\"1\"}]}",
+        "select_run_in_checkpoint_manager",
+        "loaded-by-checkpoint-manager",
+        544,
+        960,
+        22,
+        "video",
+        "head",
+        "disabled",
+        "generated_audio",
+        22,
+        5,
+        8,
+        0,
+        20,
+        0
+      ],
+      "color": "#1f1f48",
+      "bgcolor": "rgba(24,24,27,.9)"
+    },
+    {
+      "id": 2,
+      "type": "MiniMaxH3ChainCheckpointManager",
+      "pos": [
+        -950,
+        400
+      ],
+      "size": [
+        520,
+        520
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "plan",
+          "type": "H3_CHAIN_PLAN",
+          "link": 1
+        }
+      ],
+      "outputs": [
+        {
+          "name": "plan",
+          "type": "H3_CHAIN_PLAN",
+          "links": [
+            2
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-minimaxh3-contex-loop",
+        "Node name for S&R": "MiniMaxH3ChainCheckpointManager"
+      },
+      "widgets_values": [],
+      "title": "1 — SELECT + LOAD COMPLETE BRANCH"
+    },
+    {
+      "id": 3,
+      "type": "MiniMaxH3ChainUpscaleAdapter",
+      "pos": [
+        -350,
+        400
+      ],
+      "size": [
+        520,
+        430
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "plan",
+          "type": "H3_CHAIN_PLAN",
+          "link": 2
+        },
+        {
+          "name": "source_audio",
+          "type": "AUDIO",
+          "link": null,
+          "shape": 7
+        },
+        {
+          "name": "external_context",
+          "type": "H3_CHAIN_EXTERNAL_CONTEXT",
+          "link": null,
+          "shape": 7
+        }
+      ],
+      "outputs": [
+        {
+          "name": "flow",
+          "type": "H3_CHAIN_UPSCALE_FLOW",
+          "links": [
+            4
+          ]
+        },
+        {
+          "name": "state",
+          "type": "H3_CHAIN_UPSCALE_STATE",
+          "links": [
+            3
+          ]
+        },
+        {
+          "name": "source_manifest",
+          "type": "H3_CHAIN_MANIFEST",
+          "links": null
+        },
+        {
+          "name": "status",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "MiniMaxH3ChainUpscaleAdapter"
+      },
+      "widgets_values": [
+        "h3_learned_2x",
+        "h3_latent",
+        "{\"upscaler\":\"Tr1dae learned 2x\",\"pass2_steps\":4,\"denoise\":0.45,\"audio_denoise\":0}",
+        1,
+        0,
+        false,
+        18
+      ],
+      "title": "2 — UPSCALE PROFILE / RANGE"
+    },
+    {
+      "id": 4,
+      "type": "MiniMaxH3ChainUpscaleCurrent",
+      "pos": [
+        250,
+        400
+      ],
+      "size": [
+        520,
+        650
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "state",
+          "type": "H3_CHAIN_UPSCALE_STATE",
+          "link": 3
+        }
+      ],
+      "outputs": [
+        {
+          "name": "state",
+          "type": "H3_CHAIN_UPSCALE_STATE",
+          "links": [
+            5,
+            6
+          ]
+        },
+        {
+          "name": "source_latent",
+          "type": "LATENT",
+          "links": [
+            21
+          ]
+        },
+        {
+          "name": "source_video_latent",
+          "type": "LATENT",
+          "links": null
+        },
+        {
+          "name": "source_audio_latent",
+          "type": "LATENT",
+          "links": null
+        },
+        {
+          "name": "clip_index",
+          "type": "INT",
+          "links": null
+        },
+        {
+          "name": "clip_count",
+          "type": "INT",
+          "links": null
+        },
+        {
+          "name": "prompt",
+          "type": "STRING",
+          "links": [
+            16
+          ]
+        },
+        {
+          "name": "width",
+          "type": "INT",
+          "links": [
+            17
+          ]
+        },
+        {
+          "name": "height",
+          "type": "INT",
+          "links": [
+            18
+          ]
+        },
+        {
+          "name": "seed",
+          "type": "INT",
+          "links": [
+            20
+          ]
+        },
+        {
+          "name": "trim_frames",
+          "type": "INT",
+          "links": null
+        },
+        {
+          "name": "raw_frames",
+          "type": "INT",
+          "links": [
+            19
+          ]
+        },
+        {
+          "name": "delivered_frames",
+          "type": "INT",
+          "links": null
+        },
+        {
+          "name": "source_audio",
+          "type": "AUDIO",
+          "links": null
+        },
+        {
+          "name": "previous_upscaled_frames",
+          "type": "IMAGE",
+          "links": null
+        },
+        {
+          "name": "previous_upscaled_latent",
+          "type": "LATENT",
+          "links": null
+        },
+        {
+          "name": "status",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "MiniMaxH3ChainUpscaleCurrent"
+      },
+      "widgets_values": [],
+      "title": "3 — VERIFIED SOURCE SCENE"
+    },
+    {
+      "id": 5,
+      "type": "UNETLoader",
+      "pos": [
+        -1850,
+        -600
+      ],
+      "size": [
+        352,
+        96
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            7
+          ]
+        }
+      ],
+      "title": "H3 BASE MODEL",
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.30.0",
+        "Node name for S&R": "UNETLoader"
+      },
+      "widgets_values": [
+        "MiniMax-H3/minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+        "default"
+      ]
+    },
+    {
+      "id": 6,
+      "type": "ModelAttentionBackend",
+      "pos": [
+        -1450,
+        -600
+      ],
+      "size": [
+        288,
+        64
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 7
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            8
+          ]
+        }
+      ],
+      "title": "COMFY KITCHEN ATTENTION",
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.31.0",
+        "Node name for S&R": "ModelAttentionBackend"
+      },
+      "widgets_values": [
+        "comfy kitchen attention"
+      ]
+    },
+    {
+      "id": 7,
+      "type": "LoraLoaderModelOnly",
+      "pos": [
+        -1100,
+        -600
+      ],
+      "size": [
+        288,
+        96
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 8
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            9
+          ]
+        }
+      ],
+      "title": "H3 PASS-2 TURBO LORA",
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.30.0",
+        "Node name for S&R": "LoraLoaderModelOnly"
+      },
+      "widgets_values": [
+        "MiniMax H3/minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",
+        1
+      ]
+    },
+    {
+      "id": 8,
+      "type": "MiniMaxH3SigmaShift",
+      "pos": [
+        -750,
+        -600
+      ],
+      "size": [
+        320,
+        160
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 9
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            10,
+            11,
+            12
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.30.0",
+        "Node name for S&R": "MiniMaxH3SigmaShift"
+      },
+      "widgets_values": [
+        12,
+        3
+      ],
+      "title": "H3 AV SIGMA SHIFT"
+    },
+    {
+      "id": 9,
+      "type": "CLIPLoader",
+      "pos": [
+        -1850,
+        -400
+      ],
+      "size": [
+        352,
+        128
+      ],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "CLIP",
+          "type": "CLIP",
+          "links": [
+            13
+          ]
+        }
+      ],
+      "title": "H3 TEXT ENCODER",
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.30.0",
+        "Node name for S&R": "CLIPLoader"
+      },
+      "widgets_values": [
+        "MiniMax-H3/qwen3vl_32b_minimax_h3_int8_convrot.safetensors",
+        "minimax",
+        "default"
+      ]
+    },
+    {
+      "id": 10,
+      "type": "VAELoader",
+      "pos": [
+        -1850,
+        -220
+      ],
+      "size": [
+        352,
+        96
+      ],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "VAE",
+          "type": "VAE",
+          "links": [
+            14,
+            15
+          ]
+        }
+      ],
+      "title": "H3 VIDEO VAE",
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.30.0",
+        "Node name for S&R": "VAELoader"
+      },
+      "widgets_values": [
+        "MiniMaw-H3/minimax_h3_audio_vae_fp32.safetensors"
+      ]
+    },
+    {
+      "id": 11,
+      "type": "MiniMaxH3ImageToVideo",
+      "pos": [
+        900,
+        400
+      ],
+      "size": [
+        520,
+        430
+      ],
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 13
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 14
+        },
+        {
+          "name": "first_frame",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": null
+        },
+        {
+          "name": "last_frame",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": null
+        },
+        {
+          "name": "prompt",
+          "type": "STRING",
+          "widget": {
+            "name": "prompt"
+          },
+          "link": 16
+        },
+        {
+          "name": "width",
+          "type": "INT",
+          "widget": {
+            "name": "width"
+          },
+          "link": 17
+        },
+        {
+          "name": "height",
+          "type": "INT",
+          "widget": {
+            "name": "height"
+          },
+          "link": 18
+        },
+        {
+          "name": "length",
+          "type": "INT",
+          "widget": {
+            "name": "length"
+          },
+          "link": 19
+        }
+      ],
+      "outputs": [
+        {
+          "name": "positive",
+          "type": "CONDITIONING",
+          "links": [
+            25
+          ]
+        },
+        {
+          "name": "LATENT",
+          "type": "LATENT",
+          "links": null
+        }
+      ],
+      "title": "REBUILD PASS-2 T2VA CONDITIONING",
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.30.0",
+        "Node name for S&R": "MiniMaxH3ImageToVideo"
+      },
+      "widgets_values": [
+        "Loaded from saved scene prompt",
+        544,
+        960,
+        124
+      ],
+      "color": "#346434",
+      "bgcolor": "rgba(24,24,27,.9)"
+    },
+    {
+      "id": 12,
+      "type": "RandomNoise",
+      "pos": [
+        900,
+        -80
+      ],
+      "size": [
+        288,
+        96
+      ],
+      "flags": {},
+      "order": 11,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "noise_seed",
+          "type": "INT",
+          "widget": {
+            "name": "noise_seed"
+          },
+          "link": 20
+        }
+      ],
+      "outputs": [
+        {
+          "name": "NOISE",
+          "type": "NOISE",
+          "links": [
+            22
+          ]
+        }
+      ],
+      "title": "PASS-2 RE-NOISE SEED",
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.30.0",
+        "Node name for S&R": "RandomNoise"
+      },
+      "widgets_values": [
+        0,
+        "fixed"
+      ]
+    },
+    {
+      "id": 13,
+      "type": "MiniMaxH3Pass2StaggeredScheduler",
+      "pos": [
+        900,
+        -300
+      ],
+      "size": [
+        460,
+        300
+      ],
+      "flags": {},
+      "order": 12,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 10
+        }
+      ],
+      "outputs": [
+        {
+          "name": "SIGMAS",
+          "type": "SIGMAS",
+          "links": [
+            23,
+            24
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "MiniMaxH3Pass2StaggeredScheduler"
+      },
+      "widgets_values": [
+        4,
+        0.45,
+        7.0,
+        "karras",
+        8,
+        "normal"
+      ],
+      "title": "PASS-2 SIGMAS — 4 STEPS / 0.45"
+    },
+    {
+      "id": 14,
+      "type": "MiniMaxH3LatentUpscaleCombined",
+      "pos": [
+        1500,
+        150
+      ],
+      "size": [
+        620,
+        520
+      ],
+      "flags": {},
+      "order": 13,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "samples",
+          "type": "LATENT",
+          "link": 21
+        },
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 11
+        },
+        {
+          "name": "noise",
+          "type": "NOISE",
+          "link": 22
+        },
+        {
+          "name": "sigmas",
+          "type": "SIGMAS",
+          "link": 23
+        },
+        {
+          "name": "learned_upscaler",
+          "type": "H3_LATENT_UPSCALER",
+          "link": null,
+          "shape": 7
+        },
+        {
+          "name": "positive",
+          "type": "CONDITIONING",
+          "link": 25,
+          "shape": 7
+        },
+        {
+          "name": "negative",
+          "type": "CONDITIONING",
+          "link": null,
+          "shape": 7
+        }
+      ],
+      "outputs": [
+        {
+          "name": "latent",
+          "type": "LATENT",
+          "links": [
+            27
+          ]
+        },
+        {
+          "name": "positive",
+          "type": "CONDITIONING",
+          "links": [
+            26
+          ]
+        },
+        {
+          "name": "negative",
+          "type": "CONDITIONING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "MiniMaxH3LatentUpscaleCombined"
+      },
+      "widgets_values": [
+        "learned model",
+        "h3_clean_latent_upscaler_film_epoch200.safetensors",
+        0.0,
+        "independent",
+        0.0
+      ],
+      "title": "LEARNED H3 LATENT 2x + RE-NOISE"
+    },
+    {
+      "id": 15,
+      "type": "BasicGuider",
+      "pos": [
+        2200,
+        150
+      ],
+      "size": [
+        288,
+        96
+      ],
+      "flags": {},
+      "order": 14,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 12
+        },
+        {
+          "name": "conditioning",
+          "type": "CONDITIONING",
+          "link": 26
+        }
+      ],
+      "outputs": [
+        {
+          "name": "GUIDER",
+          "type": "GUIDER",
+          "links": [
+            28
+          ]
+        }
+      ],
+      "title": "REBUILT HIGH-RES GUIDER",
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.30.0",
+        "Node name for S&R": "BasicGuider"
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 16,
+      "type": "DisableNoise",
+      "pos": [
+        2200,
+        -80
+      ],
+      "size": [
+        300,
+        80
+      ],
+      "flags": {},
+      "order": 15,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "NOISE",
+          "type": "NOISE",
+          "links": [
+            29
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "Node name for S&R": "DisableNoise"
+      },
+      "widgets_values": [],
+      "title": "NO EXTRA SAMPLER NOISE"
+    },
+    {
+      "id": 17,
+      "type": "KSamplerSelect",
+      "pos": [
+        2200,
+        -300
+      ],
+      "size": [
+        288,
+        96
+      ],
+      "flags": {},
+      "order": 16,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "SAMPLER",
+          "type": "SAMPLER",
+          "links": [
+            30
+          ]
+        }
+      ],
+      "title": "PASS-2 SAMPLER — EULER",
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.30.0",
+        "Node name for S&R": "KSamplerSelect"
+      },
+      "widgets_values": [
+        "euler"
+      ]
+    },
+    {
+      "id": 18,
+      "type": "SamplerCustomAdvanced",
+      "pos": [
+        2600,
+        100
+      ],
+      "size": [
+        380,
+        520
+      ],
+      "flags": {},
+      "order": 17,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "noise",
+          "type": "NOISE",
+          "link": 29
+        },
+        {
+          "name": "guider",
+          "type": "GUIDER",
+          "link": 28
+        },
+        {
+          "name": "sampler",
+          "type": "SAMPLER",
+          "link": 30
+        },
+        {
+          "name": "sigmas",
+          "type": "SIGMAS",
+          "link": 24
+        },
+        {
+          "name": "latent_image",
+          "type": "LATENT",
+          "link": 27
+        }
+      ],
+      "outputs": [
+        {
+          "name": "output",
+          "type": "LATENT",
+          "links": [
+            31,
+            32,
+            33
+          ]
+        },
+        {
+          "name": "denoised_output",
+          "type": "LATENT",
+          "links": null
+        }
+      ],
+      "title": "H3 HIGH-RES REFINEMENT",
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.30.0",
+        "Node name for S&R": "SamplerCustomAdvanced"
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 19,
+      "type": "VAEDecode",
+      "pos": [
+        3050,
+        150
+      ],
+      "size": [
+        256,
+        96
+      ],
+      "flags": {},
+      "order": 18,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "samples",
+          "type": "LATENT",
+          "link": 31
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 15
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            34,
+            35
+          ]
+        }
+      ],
+      "title": "DECODE RAW HQ SCENE",
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.30.0",
+        "Node name for S&R": "VAEDecode"
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 20,
+      "type": "MiniMaxH3ChainUpscaleSegmentSave",
+      "pos": [
+        3450,
+        100
+      ],
+      "size": [
+        430,
+        300
+      ],
+      "flags": {},
+      "order": 19,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "state",
+          "type": "H3_CHAIN_UPSCALE_STATE",
+          "link": 5
+        },
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 34
+        },
+        {
+          "name": "upscaled_latent",
+          "type": "LATENT",
+          "link": 32,
+          "shape": 7
+        }
+      ],
+      "outputs": [
+        {
+          "name": "segment",
+          "type": "H3_CHAIN_UPSCALE_SEGMENT",
+          "links": [
+            36
+          ]
+        },
+        {
+          "name": "status",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-minimaxh3-contex-loop",
+        "Node name for S&R": "MiniMaxH3ChainUpscaleSegmentSave"
+      },
+      "widgets_values": [],
+      "title": "SAVE HQ CHILD SCENE"
+    },
+    {
+      "id": 21,
+      "type": "MiniMaxH3ChainUpscaleLoopEnd",
+      "pos": [
+        3950,
+        100
+      ],
+      "size": [
+        430,
+        360
+      ],
+      "flags": {},
+      "order": 20,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "flow",
+          "type": "H3_CHAIN_UPSCALE_FLOW",
+          "link": 4
+        },
+        {
+          "name": "state",
+          "type": "H3_CHAIN_UPSCALE_STATE",
+          "link": 6
+        },
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 35
+        },
+        {
+          "name": "segment",
+          "type": "H3_CHAIN_UPSCALE_SEGMENT",
+          "link": 36
+        },
+        {
+          "name": "upscaled_latent",
+          "type": "LATENT",
+          "link": 33,
+          "shape": 7
+        }
+      ],
+      "outputs": [
+        {
+          "name": "manifest",
+          "type": "H3_CHAIN_UPSCALE_MANIFEST",
+          "links": [
+            37
+          ]
+        },
+        {
+          "name": "manifest_json",
+          "type": "STRING",
+          "links": null
+        },
+        {
+          "name": "last_context_frames",
+          "type": "IMAGE",
+          "links": null
+        },
+        {
+          "name": "last_context_latent",
+          "type": "LATENT",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-minimaxh3-contex-loop",
+        "Node name for S&R": "MiniMaxH3ChainUpscaleLoopEnd"
+      },
+      "widgets_values": [],
+      "title": "ADVANCE UPSCALE SCENE"
+    },
+    {
+      "id": 22,
+      "type": "MiniMaxH3ChainUpscaleMerge",
+      "pos": [
+        4450,
+        100
+      ],
+      "size": [
+        470,
+        300
+      ],
+      "flags": {},
+      "order": 21,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "manifest",
+          "type": "H3_CHAIN_UPSCALE_MANIFEST",
+          "link": 37
+        },
+        {
+          "name": "source_audio",
+          "type": "AUDIO",
+          "link": null,
+          "shape": 7
+        }
+      ],
+      "outputs": [
+        {
+          "name": "video_path",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-minimaxh3-contex-loop",
+        "Node name for S&R": "MiniMaxH3ChainUpscaleMerge"
+      },
+      "widgets_values": [
+        "plan",
+        "h3_upscaled_%date:yyyy-MM-dd%",
+        256
+      ],
+      "title": "MERGE UPSCALED PROFILE"
+    },
+    {
+      "id": 23,
+      "type": "Note",
+      "pos": [
+        -1850,
+        850
+      ],
+      "size": [
+        1350,
+        620
+      ],
+      "flags": {},
+      "order": 22,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "Node name for S&R": "Note"
+      },
+      "widgets_values": [
+        "STANDALONE H3 CHECKPOINT UPSCALE\n\n1. Open Checkpoint Manager and select the saved run.\n2. Select a COMPLETE branch, then click Load selected branch. The Plan at left is replaced with that exact saved branch.\n3. Choose a unique profile in Upscale Adapter. start_clip=1/end_clip=0 processes all scenes.\n4. Queue. Each HQ scene is saved before the loop advances; Merger writes under output/h3_chains/<run>/upscaled/<profile>/final/.\n\nsave_latent is OFF by default. The sampler latent is still carried transiently between scenes, but only the small audio/assembly checkpoint is persisted. Enable it if you need to reopen the HQ latent later.\n\nFor source_track plans, connect the original full AUDIO to Adapter/Merger if validation requests it."
+      ],
+      "title": "HOW TO RUN"
+    },
+    {
+      "id": 24,
+      "type": "Note",
+      "pos": [
+        1500,
+        750
+      ],
+      "size": [
+        1200,
+        540
+      ],
+      "flags": {},
+      "order": 23,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "Node name for S&R": "Note"
+      },
+      "widgets_values": [
+        "REQUIRES\nhttps://github.com/Tr1dae/ComfyUI-MiniMaxH3_LatentUpscaler\nIts learned path also uses the sibling Mamad8 architecture pack and downloads the selected learned checkpoint on first use.\n\nThe graph uses the saved denoised x0 when present, otherwise the terminal sampler latent. Combined upscales the JOINT H3 AV latent, re-noises only video, locks pass-1 audio at audio_denoise=0, and returns resized conditioning. The Guider is rebuilt from that returned conditioning.\n\nDefaults: fixed learned 2x, staggered 4-step pass at denoise 0.45, Euler, no latent blur or sharpen. Adjust the pass-2 controls after validating one short profile. This workflow rebuilds T2VA text conditioning from the saved prompt; reference-heavy Ref2VA recipes may need their original reference conditioning wired into the backend body."
+      ],
+      "title": "DEPENDENCY / PASS-2 NOTES"
+    }
+  ],
+  "links": [
+    [
+      1,
+      1,
+      0,
+      2,
+      0,
+      "H3_CHAIN_PLAN"
+    ],
+    [
+      2,
+      2,
+      0,
+      3,
+      0,
+      "H3_CHAIN_PLAN"
+    ],
+    [
+      3,
+      3,
+      1,
+      4,
+      0,
+      "H3_CHAIN_UPSCALE_STATE"
+    ],
+    [
+      4,
+      3,
+      0,
+      21,
+      0,
+      "H3_CHAIN_UPSCALE_FLOW"
+    ],
+    [
+      5,
+      4,
+      0,
+      20,
+      0,
+      "H3_CHAIN_UPSCALE_STATE"
+    ],
+    [
+      6,
+      4,
+      0,
+      21,
+      1,
+      "H3_CHAIN_UPSCALE_STATE"
+    ],
+    [
+      7,
+      5,
+      0,
+      6,
+      0,
+      "MODEL"
+    ],
+    [
+      8,
+      6,
+      0,
+      7,
+      0,
+      "MODEL"
+    ],
+    [
+      9,
+      7,
+      0,
+      8,
+      0,
+      "MODEL"
+    ],
+    [
+      10,
+      8,
+      0,
+      13,
+      0,
+      "MODEL"
+    ],
+    [
+      11,
+      8,
+      0,
+      14,
+      1,
+      "MODEL"
+    ],
+    [
+      12,
+      8,
+      0,
+      15,
+      0,
+      "MODEL"
+    ],
+    [
+      13,
+      9,
+      0,
+      11,
+      0,
+      "CLIP"
+    ],
+    [
+      14,
+      10,
+      0,
+      11,
+      1,
+      "VAE"
+    ],
+    [
+      15,
+      10,
+      0,
+      19,
+      1,
+      "VAE"
+    ],
+    [
+      16,
+      4,
+      6,
+      11,
+      4,
+      "STRING"
+    ],
+    [
+      17,
+      4,
+      7,
+      11,
+      5,
+      "INT"
+    ],
+    [
+      18,
+      4,
+      8,
+      11,
+      6,
+      "INT"
+    ],
+    [
+      19,
+      4,
+      11,
+      11,
+      7,
+      "INT"
+    ],
+    [
+      20,
+      4,
+      9,
+      12,
+      0,
+      "INT"
+    ],
+    [
+      21,
+      4,
+      1,
+      14,
+      0,
+      "LATENT"
+    ],
+    [
+      22,
+      12,
+      0,
+      14,
+      2,
+      "NOISE"
+    ],
+    [
+      23,
+      13,
+      0,
+      14,
+      3,
+      "SIGMAS"
+    ],
+    [
+      24,
+      13,
+      0,
+      18,
+      3,
+      "SIGMAS"
+    ],
+    [
+      25,
+      11,
+      0,
+      14,
+      5,
+      "CONDITIONING"
+    ],
+    [
+      26,
+      14,
+      1,
+      15,
+      1,
+      "CONDITIONING"
+    ],
+    [
+      27,
+      14,
+      0,
+      18,
+      4,
+      "LATENT"
+    ],
+    [
+      28,
+      15,
+      0,
+      18,
+      1,
+      "GUIDER"
+    ],
+    [
+      29,
+      16,
+      0,
+      18,
+      0,
+      "NOISE"
+    ],
+    [
+      30,
+      17,
+      0,
+      18,
+      2,
+      "SAMPLER"
+    ],
+    [
+      31,
+      18,
+      0,
+      19,
+      0,
+      "LATENT"
+    ],
+    [
+      32,
+      18,
+      0,
+      20,
+      2,
+      "LATENT"
+    ],
+    [
+      33,
+      18,
+      0,
+      21,
+      4,
+      "LATENT"
+    ],
+    [
+      34,
+      19,
+      0,
+      20,
+      1,
+      "IMAGE"
+    ],
+    [
+      35,
+      19,
+      0,
+      21,
+      2,
+      "IMAGE"
+    ],
+    [
+      36,
+      20,
+      0,
+      21,
+      3,
+      "H3_CHAIN_UPSCALE_SEGMENT"
+    ],
+    [
+      37,
+      21,
+      0,
+      22,
+      0,
+      "H3_CHAIN_UPSCALE_MANIFEST"
+    ]
+  ],
+  "groups": [
+    {
+      "id": 1,
+      "title": "LOAD SAVED H3 BRANCH",
+      "bounding": [
+        -1920,
+        320,
+        2160,
+        1200
+      ],
+      "color": "#8a5a2b",
+      "flags": {}
+    },
+    {
+      "id": 2,
+      "title": "H3 PASS-2 MODEL STACK",
+      "bounding": [
+        -1920,
+        -680,
+        1600,
+        720
+      ],
+      "color": "#3f789e",
+      "flags": {}
+    },
+    {
+      "id": 3,
+      "title": "LEARNED H3 2x UPSCALE LOOP",
+      "bounding": [
+        200,
+        -380,
+        4200,
+        1140
+      ],
+      "color": "#744c8c",
+      "flags": {}
+    },
+    {
+      "id": 4,
+      "title": "UPSCALED FINAL",
+      "bounding": [
+        4400,
+        20,
+        600,
+        420
+      ],
+      "color": "#2f6b3f",
+      "flags": {}
+    }
+  ],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.55,
+      "offset": [
+        2050,
+        820
+      ]
+    },
+    "frontendVersion": "1.48.7",
+    "comfyui_mcp": {
+      "workflow_uuid": "3f6f3198-b35b-4c08-9681-45accc20efab"
+    }
+  },
+  "version": 0.4
+}

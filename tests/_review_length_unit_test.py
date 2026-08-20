@@ -7,6 +7,9 @@ import json
 import pathlib
 import sys
 import types
+from contextlib import nullcontext
+
+import torch
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -169,6 +172,163 @@ async def check_route_validation():
 
 
 asyncio.run(check_route_validation())
+
+
+assert chain._review_candidate_target(1) == 1
+assert chain._review_candidate_target("10") == 10
+try:
+    chain._review_candidate_target(21)
+except ValueError as exc:
+    assert "between 1 and 20" in str(exc)
+else:
+    raise AssertionError("Review Gate accepted too many candidates")
+
+
+def candidate_segment(revision, seed):
+    selected_plan = chain._plan_with_review_revision(
+        plan, 2, "Scene 2.", seed, 56)
+    return {
+        "index": 2,
+        "id": "scene_2",
+        "revision": revision,
+        "segment": "segments/%s.mp4" % revision,
+        "checkpoint": "checkpoints/%s.safetensors" % revision,
+        "metadata": "checkpoints/clip_0002.json",
+        "revision_metadata": "checkpoints/%s.json" % revision,
+        "raw_frames": 56,
+        "delivered_frames": 34,
+        "scene_prompt": "Scene 2.",
+        "prompt": "Scene 2.",
+        "prompt_hash": selected_plan["shots"][1]["prompt_hash"],
+        "history_hash": chain._history_hash(selected_plan, 2),
+        "seed": str(seed),
+        "steps": 20,
+        "checkpoint_sha256": revision,
+    }
+
+
+async def check_candidate_batch():
+    sent = []
+
+    class BatchServerInstance:
+        client_id = "candidate-client"
+
+        def send_sync(self, event, payload, client_id=None):
+            sent.append((event, payload, client_id))
+
+    original_server = chain.PromptServer
+    original_review_video = chain._review_video
+    original_load_revision = chain._load_checkpoint_revision
+    chain.PromptServer = type(
+        "BatchServer", (), {"instance": BatchServerInstance()})
+    chain._review_video = lambda _plan, segment, _audio, retain_previous=False: (
+        {"filename": "%s.mp4" % segment["revision"],
+         "subfolder": "candidates", "type": "output"}, True, "")
+    first = candidate_segment("a" * 32, 2)
+    try:
+        first_result = await chain.MiniMaxH3ChainReview().review(
+            {"plan": plan, "index": 2, "segments": [{"revision": "parent"}]},
+            first, True, False, 0.0, False, False, "none",
+            candidate_count=2, unique_id="review-node")
+        decision = first_result["result"][0]["_h3_review_decision"]
+        assert decision["action"] == "retry"
+        assert decision["candidate_batch"]["target"] == 2
+        assert len(decision["candidate_batch"]["candidates"]) == 1
+        assert decision["seed"] != 2
+
+        second_plan = chain._plan_with_review_revision(
+            plan, 2, "Scene 2.", decision["seed"], 56)
+        second = candidate_segment("b" * 32, decision["seed"])
+        state = {
+            "plan": second_plan,
+            "index": 2,
+            "segments": [{"revision": "parent"}],
+            "candidate_batch": decision["candidate_batch"],
+        }
+        chain._load_checkpoint_revision = lambda _run, _scene, revision: (
+            {"segment": first if revision == first["revision"] else second},
+            "candidate.json")
+        task = asyncio.create_task(chain.MiniMaxH3ChainReview().review(
+            state, second, True, False, 0.0, False, False, "none",
+            candidate_count=2, unique_id="review-node"))
+        for _ in range(100):
+            if chain._PENDING_REVIEWS:
+                break
+            await asyncio.sleep(0.01)
+        assert chain._PENDING_REVIEWS
+        public = next(iter(chain._PENDING_REVIEWS.values()))["public"]
+        assert public["candidate_count"] == 2
+        assert [item["revision"] for item in public["candidates"]] == [
+            first["revision"], second["revision"]]
+        token = public["token"]
+
+        class ChooseCurrent:
+            async def json(self):
+                return {"token": token, "action": "approve",
+                        "candidate_revision": second["revision"]}
+
+        response = await chain._submit_review_decision(ChooseCurrent())
+        body = json.loads(response.text)
+        assert response.status == 200
+        assert body["candidate_number"] == 2
+        result = await asyncio.wait_for(task, timeout=2.0)
+        assert result["result"][0]["revision"] == second["revision"]
+        assert "selected candidate 2/2" in result["result"][1]
+    finally:
+        chain._PENDING_REVIEWS.clear()
+        chain.PromptServer = original_server
+        chain._review_video = original_review_video
+        chain._load_checkpoint_revision = original_load_revision
+
+
+asyncio.run(check_candidate_batch())
+
+
+def check_exact_candidate_selection():
+    current_plan = chain._plan_with_review_revision(
+        plan, 2, "Scene 2.", 999, 56)
+    selected = candidate_segment("c" * 32, 2)
+    metadata = {
+        "compatibility": plan["compatibility"],
+        "segment": selected,
+    }
+    original_load_revision = chain._load_checkpoint_revision
+    original_st_load = chain._st_load
+    original_atomic_json = chain._atomic_json
+    original_lock = chain.checkpoint_run_lock
+    writes = []
+    chain._load_checkpoint_revision = lambda *_args: (metadata, "selected.json")
+    chain._st_load = lambda _path: {
+        "context_frames": torch.zeros((22, 2, 2, 3)),
+        "video": torch.zeros((1, 2, 2)),
+        "audio": torch.zeros((1, 2, 2)),
+    }
+    chain._atomic_json = lambda path, value: writes.append((path, value))
+    chain.checkpoint_run_lock = lambda *_args: nullcontext()
+    try:
+        accepted, selected_state = chain._select_review_candidate({
+            "plan": current_plan,
+            "index": 2,
+            "segments": [{"revision": "parent"}],
+            "candidate_batch": {"scene": 2},
+        }, candidate_segment("d" * 32, 999), {
+            "candidate_revision": selected["revision"],
+        })
+        choice = accepted["_h3_review_decision"]
+        assert choice["action"] == "candidate_selected"
+        assert choice["plan"]["shots"][1]["seed"] == 2
+        assert choice["context_frames"].shape[0] == 22
+        assert selected_state["plan"]["shots"][1]["seed"] == 2
+        assert "candidate_batch" not in selected_state
+        assert writes and writes[0][1] is metadata
+    finally:
+        chain._load_checkpoint_revision = original_load_revision
+        chain._st_load = original_st_load
+        chain._atomic_json = original_atomic_json
+        chain.checkpoint_run_lock = original_lock
+
+
+check_exact_candidate_selection()
 
 
 class FakePromptServerInstance:

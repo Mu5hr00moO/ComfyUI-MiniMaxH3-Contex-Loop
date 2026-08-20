@@ -13,6 +13,7 @@ example_workflows/
 │   ├── jigen_market_garden_doom_opening.png
 │   └── jigen_market_garden_doom_last.png
 ├── EXPERIMENTAL MiniMax H3 Ref2V - Sequential Motion.json
+├── MiniMax H3 Deferred Upscale - H3 Learned 2x.json
 ├── MiniMax H3 FL2V - Normal.json
 ├── MiniMax H3 I2V - Normal.json
 ├── MiniMax H3 I2V - Studio.json
@@ -36,6 +37,31 @@ restoration. The former numeric-range examples are retained in `Archive/`.
 The additional sequential-motion workflow is deliberately prefixed
 `EXPERIMENTAL` because it combines a long advancing Ref2VA video timeline with
 recursive Motion Context.
+
+## Deferred H3 upscale
+
+[`MiniMax H3 Deferred Upscale - H3 Learned 2x.json`](<MiniMax H3 Deferred Upscale - H3 Learned 2x.json>)
+is a standalone second-pass workflow: it contains no first-pass generation
+loop. Use Checkpoint Manager inside it to select a completed saved branch and
+load that exact Plan, then queue the child upscale profile.
+
+The loop uses Tr1dae's **MiniMax H3 Latent Upscale Combined 2x**, the learned
+clean-latent path, a four-step staggered refinement schedule at denoise 0.45,
+Euler, and locked parent audio. It rebuilds T2VA text conditioning from every
+saved scene prompt and sends the returned high-resolution conditioning into a
+new Guider. Install
+[ComfyUI-MiniMaxH3_LatentUpscaler](https://github.com/Tr1dae/ComfyUI-MiniMaxH3_LatentUpscaler)
+before opening the graph. The selected model and LoRA filenames match this
+repository's maintained H3 examples and remain editable.
+
+`save_latent` is off by default. Every delivered HQ scene, prompt, audio
+sidecar, integrity record, partial manifest, and final merge remains under
+`output/h3_chains/<run>/upscaled/<profile>/`; enable latent saving only when
+the full HQ sampler latent itself is needed later. Source-track runs also need
+their original full AUDIO connected to the adapter/merger. Reference-heavy
+Ref2VA second passes may need their original reference conditioning added to
+the backend body; the supplied standalone graph intentionally reconstructs
+T2VA text conditioning only.
 
 ## T2V
 

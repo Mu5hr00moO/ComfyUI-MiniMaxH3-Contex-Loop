@@ -10,6 +10,15 @@ persisted before the gate waits, then the gate offers:
 - **Reroll seed**
 - **Approve & stop**, optionally assembling a partial video
 
+Set Review Gate's optional **candidate_count** above 1 to collect several
+different-seed takes before making a decision. Intermediate takes are saved and
+rerolled automatically. When the requested count is reached, use **Choose take**
+to preview the candidates, then continue or stop with the selected checkpoint.
+The chosen take's saved video frames and AV tensors—not the last generated
+take—become the context for the following scene. The default value of 1 keeps
+the normal one-take review behavior. The widget can be converted to an input
+and driven by a regular INT node; the safety limit is 20 candidates per scene.
+
 Notification sound, automatic timeout, and model unloading while waiting are
 optional. Drag the bar below the player to resize it; double-click to restore
 the default height.
@@ -53,7 +62,7 @@ partial through the selected predecessor.
 
 **Refresh** in Review Gate discovers the active checkpoint and every immutable
 revision retained for that scene. Choose the scene to resume, then select the
-desired version of each predecessor under **Checkpoint revisions**. Clicking
+desired version of each predecessor under **Checkpoint history**. Clicking
 **Restore & load** validates the selected MP4, safetensors checkpoint, hashes,
 shared prompt, and compatibility contract before atomically promoting the
 selected prefix. The corresponding prompts, seeds, lengths, steps, and scene
@@ -67,7 +76,10 @@ an MP4 copied from `segments/` or `reviews/` alone cannot recreate the saved AV
 latent. When only video survives, use Existing Video Context as a re-encoded
 continuation instead.
 
-Inactive leaf revisions can be deleted from the same panel to reclaim space.
+Retrying, rerolling, and candidate collection intentionally retain earlier
+files as immutable revisions; they are recovery points rather than abandoned
+temporary files. Inactive leaf revisions can be deleted from the same panel or
+the dedicated Checkpoint Manager to reclaim space.
 Review Gate now retrieves a fresh server-side deletion preview before asking
 for confirmation. Active revisions and revisions with dependent later scenes
 cannot be deleted. Cleanup is limited to that revision's segment, safetensors
@@ -103,6 +115,64 @@ Deletion is deliberately one scene revision at a time:
 This first release does not bulk-delete branches. The leaf-first workflow makes
 the exact context consequences visible and avoids silently orphaning later
 checkpoints.
+
+### Deferred upscale child runs
+
+After loading the complete branch you want in Checkpoint Manager, connect its
+Plan output to **MiniMax H3 Checkpoint Upscale Adapter**. The adapter verifies
+every active parent checkpoint and starts a separate recursive pass without
+changing the source run:
+
+```text
+Checkpoint Manager → Upscale Adapter → Upscale Current Scene
+                                      → backend graph
+                                      → Upscale Segment Save
+                                      → Upscale Loop End → Upscale Merger
+```
+
+**Upscale Current Scene** prefers the optional `denoised_output` saved by
+Segment + Checkpoint and falls back to the terminal sampler latent in older
+checkpoints. It exposes the joint H3 AV latent as well as separate video and
+audio latents:
+
+- Tr1dae/Mamad8 combined-style nodes can consume `source_latent` directly.
+- Video-only LBH-style nodes consume `source_video_latent`; recombine their
+  result with `source_audio_latent` before an H3 refinement pass when that graph
+  expects joint AV. Preserve the parent audio unless intentional audio
+  regeneration is part of the recipe.
+- LTX 2.5 is a decoded-video V2V path, not an H3-latent path. Decode the H3
+  source latent, run the LTX refinement/upscale graph, and send its raw frame
+  batch to Upscale Segment Save.
+
+Send the backend's decoded **raw** frame batch to both Segment Save and Loop
+End. They remove the parent scene's repeated context head exactly once, persist
+the delivered HQ segment, and carry optional HQ context to the next iteration.
+Set a distinct `profile` for each recipe so settings and outputs cannot collide.
+The profile folder is:
+
+```text
+output/h3_chains/<run_name>/upscaled/<profile>/
+├── segments/
+├── checkpoints/
+├── prompts/
+├── audio/
+├── partial/
+├── upscale_manifest.json
+└── final/
+```
+
+`save_latent` defaults off. Segment Save still writes a small verified
+safetensors checkpoint containing the assembly audio, so the child run remains
+resumable and mergeable without duplicating the much larger HQ sampler latent.
+Enable it only when you want to reopen/refine the HQ latent itself. The
+transient `upscaled_latent` connection on Loop End remains usable for scene
+continuity whether or not persistence is enabled.
+
+For new parent renders, connect SamplerCustomAdvanced `denoised_output` to
+Segment + Checkpoint's optional `denoised_latent` input. Existing checkpoints
+remain valid and use their terminal sampler output. Keep the parent branch
+until every selected child scene has been persisted; a completed child profile
+contains its own HQ video segments and audio needed by Upscale Merger.
 
 ## Run Manager
 
@@ -152,6 +222,7 @@ output/h3_chains/<run_name>/
 ├── checkpoints/clip_0001.<revision>.json
 ├── checkpoints/clip_0001.<revision>.safetensors
 ├── generated_audio/
+├── upscaled/<profile>/
 └── final/<filename>.mp4
 ```
 

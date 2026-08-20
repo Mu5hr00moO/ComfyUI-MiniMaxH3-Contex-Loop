@@ -1,8 +1,13 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "comfyui-minimaxh3-contex-loop"
 description = "Recursive, checkpointed MiniMax H3 scene loops with motion/audio context, audiovisual review, resume, and final assembly for ComfyUI."
-version = "0.4.17"
-license = { file = "LICENSE" }
+version = "0.4.20"
+license = "GPL-3.0"
+license-files = ["LICENSE"]
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [
@@ -21,7 +26,6 @@ keywords = [
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: End Users/Desktop",
-    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -39,3 +43,6 @@ Upstream = "https://github.com/NikoDemon80/ComfyUI-H3-Motion-Context"
 [tool.comfy]
 PublisherId = "ethanfel"
 DisplayName = "MiniMax H3 Contex Loop"
+
+[tool.setuptools]
+packages = []

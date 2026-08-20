@@ -99,6 +99,7 @@ FPS = 24
 PLAN_VERSION = 2
 MAX_SHOTS = 128
 MAX_SEED = 0xFFFFFFFFFFFFFFFF
+MAX_REVIEW_CANDIDATES = 20
 MAX_H3_FRAMES = 3592  # largest 17k+5 value accepted by H3's 3600-frame socket
 H3_CONTEXT_LENGTHS = (
     1, 5, 22, 39, 56, 73, 90, 107, 124,
@@ -4934,6 +4935,11 @@ class MiniMaxH3ChainSegmentSave:
                                "It contains the retained repeated head followed "
                                "by the normal delivered frames and is saved as "
                                "a separate disk-backed assembly artifact."}),
+                "denoised_latent": ("LATENT", {
+                    "tooltip": "Optional SamplerCustomAdvanced denoised_output. "
+                               "Saved beside the terminal sampler output so a "
+                               "deferred learned upscaler can prefer explicit "
+                               "clean x0 while older checkpoints remain usable."}),
             },
             "hidden": {
                 "prompt": "PROMPT",
@@ -4959,8 +4965,8 @@ class MiniMaxH3ChainSegmentSave:
         return float("NaN")
 
     def save(self, state, images, sampled_latent, audio=None,
-             images_with_overlap=None, prompt=None, extra_pnginfo=None,
-             audio_with_overlap=None):
+         images_with_overlap=None, denoised_latent=None,
+         prompt=None, extra_pnginfo=None, audio_with_overlap=None):
         if _st_save is None:
             raise RuntimeError("safetensors is required for H3 chain checkpoints.")
         plan = state["plan"]
@@ -5010,6 +5016,12 @@ class MiniMaxH3ChainSegmentSave:
             "video": parts[0],
             "audio": parts[1],
         }
+        if denoised_latent is not None:
+            denoised = _compact_latent(denoised_latent)["samples"]
+            tensors.update({
+                "denoised_video": denoised[0],
+                "denoised_audio": denoised[1],
+            })
         sample_rate = 0
         if audio is not None:
             waveform, sample_rate = _validate_audio(
@@ -5097,6 +5109,8 @@ class MiniMaxH3ChainSegmentSave:
                 "prompt_hash": str(shot["prompt_hash"]),
                 "seed": str(shot["seed"]),
                 "sample_rate": str(sample_rate),
+                "denoised_latent": (
+                    "true" if denoised_latent is not None else "false"),
             })
             os.replace(checkpoint_tmp, published_checkpoint)
 
@@ -5258,7 +5272,9 @@ class MiniMaxH3ChainSegmentSave:
 
 
 def _review_video(plan: dict[str, Any], segment: dict[str, Any],
-                  audio: dict[str, Any] | None) -> tuple[dict[str, str], bool, str]:
+                  audio: dict[str, Any] | None,
+                  retain_previous: bool = False
+                  ) -> tuple[dict[str, str], bool, str]:
     source = _absolute_output_path(segment["segment"])
     relative_source = _relative_output_path(source)
     if audio is None:
@@ -5308,11 +5324,12 @@ def _review_video(plan: dict[str, Any], segment: dict[str, Any],
             _safe_unlink(wav_tmp)
             _safe_unlink(video_tmp)
 
-        prefix = "clip_%04d." % index
-        for filename in os.listdir(review_dir):
-            if (filename != name and filename.startswith(prefix) and
-                    filename.endswith(".review.mp4")):
-                _safe_unlink(os.path.join(review_dir, filename))
+        if not retain_previous:
+            prefix = "clip_%04d." % index
+            for filename in os.listdir(review_dir):
+                if (filename != name and filename.startswith(prefix) and
+                        filename.endswith(".review.mp4")):
+                    _safe_unlink(os.path.join(review_dir, filename))
 
     return (_video_output_item(review_path), True, "")
 
@@ -5332,6 +5349,158 @@ def _review_timeout_seconds(minutes: Any) -> float:
     if not math.isfinite(value) or value < 0:
         raise ValueError("H3 review timeout must be a finite non-negative value.")
     return min(1440.0, value) * 60.0
+
+
+def _review_candidate_target(value: Any) -> int:
+    try:
+        target = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("H3 review candidate count must be an integer.") from exc
+    if target < 1 or target > MAX_REVIEW_CANDIDATES:
+        raise ValueError(
+            "H3 review candidate count must be between 1 and %d." %
+            MAX_REVIEW_CANDIDATES)
+    return target
+
+
+def _review_batch_candidates(state: dict[str, Any], index: int,
+                             target: int) -> list[dict[str, Any]]:
+    batch = state.get("candidate_batch")
+    if (not isinstance(batch, dict) or int(batch.get("scene", -1)) != index
+            or int(batch.get("target", -1)) != target):
+        return []
+    candidates = batch.get("candidates")
+    if not isinstance(candidates, list):
+        return []
+    valid = []
+    revisions = set()
+    for candidate in candidates:
+        segment = candidate.get("segment") if isinstance(candidate, dict) else None
+        revision = str(segment.get("revision") or "") if isinstance(
+            segment, dict) else ""
+        if (not isinstance(segment, dict)
+                or int(segment.get("index", -1)) != index
+                or re.fullmatch(r"[0-9a-f]{32}", revision) is None
+                or revision in revisions):
+            return []
+        revisions.add(revision)
+        valid.append(candidate)
+    return valid
+
+
+def _review_candidate_record(segment: dict[str, Any], video: dict[str, str],
+                             has_audio: bool, warning: str) -> dict[str, Any]:
+    return {
+        "segment": _public_segment(segment),
+        "video": dict(video),
+        "has_audio": bool(has_audio),
+        "warning": str(warning or ""),
+    }
+
+
+def _review_public_candidates(
+        candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    public = []
+    for number, candidate in enumerate(candidates, start=1):
+        segment = candidate["segment"]
+        public.append({
+            "number": number,
+            "revision": str(segment.get("revision") or ""),
+            "seed": str(segment.get("seed") or "0"),
+            "created_at": str(segment.get("created_at") or ""),
+            "video": candidate.get("video"),
+            "has_audio": bool(candidate.get("has_audio")),
+            "warning": str(candidate.get("warning") or ""),
+        })
+    return public
+
+
+def _review_next_candidate_seed(candidates: list[dict[str, Any]],
+                                current_seed: int) -> int:
+    used = {int(current_seed)}
+    for candidate in candidates:
+        try:
+            used.add(int(candidate["segment"].get("seed", 0)))
+        except (KeyError, TypeError, ValueError):
+            continue
+    seed = secrets.randbits(64)
+    while seed in used:
+        seed = secrets.randbits(64)
+    return seed
+
+
+def _select_review_candidate(
+        state: dict[str, Any], current_segment: dict[str, Any],
+        decision: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    revision = str(decision.get("candidate_revision") or "")
+    if not revision or revision == str(current_segment.get("revision") or ""):
+        return current_segment, state
+    if _st_load is None:
+        raise RuntimeError("safetensors is required to select an H3 candidate.")
+    plan = state["plan"]
+    index = int(state["index"])
+    metadata, _metadata_path = _load_checkpoint_revision(
+        str(plan["run_name"]), index, revision)
+    if _canonical_json(metadata.get("compatibility")) != _canonical_json(
+            plan.get("compatibility")):
+        raise ValueError(
+            "The selected candidate uses different Plan compatibility settings.")
+    selected = metadata["segment"]
+    if index > 1:
+        predecessors = state.get("segments")
+        predecessor = predecessors[-1] if isinstance(
+            predecessors, list) and predecessors else None
+        expected_revision = str(selected.get("predecessor_revision") or "")
+        expected_hash = str(
+            selected.get("predecessor_checkpoint_sha256") or "")
+        if (not isinstance(predecessor, dict)
+                or (expected_revision and expected_revision != str(
+                    predecessor.get("revision") or ""))
+                or (expected_hash and expected_hash != str(
+                    predecessor.get("checkpoint_sha256") or ""))):
+            raise ValueError(
+                "The selected candidate was generated from a different "
+                "predecessor checkpoint.")
+    selected_plan = _plan_with_review_revision(
+        plan, index, str(selected.get("scene_prompt") or ""),
+        int(selected.get("seed", 0)), int(selected.get("raw_frames", 0)))
+    expected_history = _history_hash(selected_plan, index)
+    if str(selected.get("history_hash") or "") != expected_history:
+        raise ValueError(
+            "The selected candidate does not match the current scene plan.")
+    tensors = _st_load(_absolute_output_path(selected["checkpoint"]))
+    missing = sorted({"context_frames", "video", "audio"} - set(tensors))
+    if missing:
+        raise ValueError(
+            "The selected candidate checkpoint is missing tensors: %s" % missing)
+    expected_context = min(
+        _plan_context_storage_length(selected_plan),
+        int(selected.get("delivered_frames", 0)))
+    if int(tensors["context_frames"].shape[0]) != expected_context:
+        raise ValueError(
+            "The selected candidate contains %d context frames; expected %d." %
+            (int(tensors["context_frames"].shape[0]), expected_context))
+    canonical = _artifact_paths(selected_plan, index)["metadata"]
+    with checkpoint_run_lock(_output_root(), str(selected_plan["run_name"])):
+        _atomic_json(canonical, metadata)
+        # Keep disk recovery aligned with the promoted take even if ComfyUI is
+        # interrupted before the following scene reaches Segment Save.
+        _write_run_archives(selected_plan)
+    accepted = dict(_public_segment(selected))
+    accepted["_h3_review_decision"] = {
+        "action": "candidate_selected",
+        "revision": revision,
+        "plan": selected_plan,
+        "context_frames": tensors["context_frames"],
+        "sampled_latent": {
+            "samples": [tensors["video"], tensors["audio"]],
+        },
+    }
+    selected_state = dict(state)
+    selected_state["plan"] = selected_plan
+    selected_state.pop("candidate_batch", None)
+    return accepted, selected_state
 
 
 def _throw_if_review_interrupted() -> None:
@@ -5426,6 +5595,18 @@ class MiniMaxH3ChainReview:
                 "source_audio": ("AUDIO", {
                     "tooltip": "Optional full source track used only when partial "
                                "audio source is source."}),
+                "candidate_count": ("INT", {
+                    "default": 1,
+                    "min": 1,
+                    "max": MAX_REVIEW_CANDIDATES,
+                    "step": 1,
+                    "tooltip": "Generate this many different-seed takes for "
+                               "each scene before pausing. 1 keeps the normal "
+                               "single-take review. Higher values automatically "
+                               "save and reroll candidates, then let you choose "
+                               "which exact checkpoint continues the chain. "
+                               "Convert this widget to an input to drive it from "
+                               "an INT node."}),
             },
             "hidden": {
                 "dynprompt": "DYNPROMPT",
@@ -5455,7 +5636,7 @@ class MiniMaxH3ChainReview:
     async def review(self, state, segment, enabled, play_notification_sound,
                      auto_continue_timeout_minutes, unload_models_while_waiting,
                      assemble_partial_on_stop, partial_audio_source, audio=None,
-                     source_audio=None,
+                     source_audio=None, candidate_count=1,
                      dynprompt=None, unique_id=None):
         plan = state["plan"]
         index = int(state["index"])
@@ -5477,6 +5658,51 @@ class MiniMaxH3ChainReview:
         video, _has_audio, no_audio_warning = _review_video(
             plan, segment, None)
         shot = plan["shots"][index - 1]
+        candidate_target = _review_candidate_target(candidate_count)
+        previous_candidates = _review_batch_candidates(
+            state, index, candidate_target)
+        candidate_index = len(previous_candidates) + 1
+        if candidate_index > candidate_target:
+            previous_candidates = []
+            candidate_index = 1
+        if candidate_index < candidate_target:
+            try:
+                candidate_video, candidate_has_audio, candidate_warning = (
+                    _review_video(
+                        plan, segment, audio, retain_previous=True))
+            except Exception as exc:
+                _LOG.exception(
+                    "H3 Chain candidate synchronized preview failed")
+                candidate_video, candidate_has_audio, candidate_warning = (
+                    video, False,
+                    "Candidate audio preview is unavailable (%s)." % exc)
+            candidates = previous_candidates + [_review_candidate_record(
+                segment, candidate_video, candidate_has_audio,
+                candidate_warning)]
+            next_seed = _review_next_candidate_seed(
+                candidates, int(shot["seed"]))
+            revised_segment = dict(segment)
+            revised_segment["_h3_review_decision"] = {
+                "action": "retry",
+                "scene_prompt": shot.get("scene_prompt", shot["prompt"]),
+                "seed": next_seed,
+                "raw_frames": int(shot["raw_frames"]),
+                "candidate_batch": {
+                    "scene": index,
+                    "target": candidate_target,
+                    "candidates": candidates,
+                },
+            }
+            status = (
+                "saved candidate %d/%d for clip %d; generating candidate %d "
+                "with seed %d" %
+                (candidate_index, candidate_target, index,
+                 candidate_index + 1, next_seed))
+            return {"ui": {"text": [status]},
+                    "result": (revised_segment, status)}
+
+        candidates = previous_candidates + [_review_candidate_record(
+            segment, video, False, no_audio_warning)]
         timeout_seconds = _review_timeout_seconds(
             auto_continue_timeout_minutes)
         server_now = time.time()
@@ -5503,6 +5729,9 @@ class MiniMaxH3ChainReview:
                         if audio is not None else no_audio_warning),
             "preview_pending": audio is not None,
             "preview_revision": 0,
+            "candidate_index": candidate_index,
+            "candidate_count": candidate_target,
+            "candidates": _review_public_candidates(candidates),
             "play_notification_sound": bool(play_notification_sound),
             "unload_models_while_waiting": bool(unload_models_while_waiting),
             "assemble_partial_on_stop": bool(assemble_partial_on_stop),
@@ -5517,6 +5746,7 @@ class MiniMaxH3ChainReview:
             "plan": plan,
             "current_seed": int(shot["seed"]),
             "current_length": int(shot["raw_frames"]),
+            "candidates": candidates,
         }
         PromptServer.instance.send_sync(
             "minimax_h3_context_loop_review", dict(payload),
@@ -5530,7 +5760,12 @@ class MiniMaxH3ChainReview:
             # can fail into a silent review instead of an unresolvable workflow
             # hang.
             try:
-                video, has_audio, warning = _review_video(plan, segment, audio)
+                if candidate_target > 1:
+                    video, has_audio, warning = _review_video(
+                        plan, segment, audio, retain_previous=True)
+                else:
+                    video, has_audio, warning = _review_video(
+                        plan, segment, audio)
             except Exception as exc:
                 _LOG.exception("H3 Chain synchronized review preview failed")
                 has_audio = False
@@ -5545,6 +5780,9 @@ class MiniMaxH3ChainReview:
                 "preview_revision": 1,
                 "server_now": time.time(),
             })
+            candidates[-1] = _review_candidate_record(
+                segment, video, has_audio, warning)
+            payload["candidates"] = _review_public_candidates(candidates)
             PromptServer.instance.send_sync(
                 "minimax_h3_context_loop_review", dict(payload),
                 PromptServer.instance.client_id)
@@ -5582,14 +5820,27 @@ class MiniMaxH3ChainReview:
                 future.cancel()
 
         action = decision["action"]
+        accepted_segment = segment
+        accepted_state = state
+        if action in ("approve", "stop"):
+            accepted_segment, accepted_state = _select_review_candidate(
+                state, segment, decision)
+        candidate_number = int(decision.get("candidate_number", 0))
+        candidate_total = int(decision.get("candidate_count", 0))
+        candidate_note = (
+            "; selected candidate %d/%d" %
+            (candidate_number, candidate_total)
+            if candidate_total > 1 and candidate_number > 0 else "")
         if action == "approve":
             timed_out = bool(decision.get("timed_out"))
             status = (("review timed out; auto-approved clip %d/%d; continuing")
                       if timed_out else ("approved clip %d/%d; continuing")) % (
                           index, len(plan["shots"]))
-            if index == len(plan["shots"]):
+            status += candidate_note
+            accepted_plan = accepted_state["plan"]
+            if index == len(accepted_plan["shots"]):
                 _PENDING_FINAL_REVIEW_PREVIEWS[
-                    _final_review_preview_key(plan)
+                    _final_review_preview_key(accepted_plan)
                 ] = {
                     "token": token,
                     "node_id": payload["node_id"],
@@ -5601,16 +5852,19 @@ class MiniMaxH3ChainReview:
                     {"token": token, "node_id": payload["node_id"],
                      "action": "timeout_approve", "status": status},
                     PromptServer.instance.client_id)
-            return {"ui": {"text": [status]}, "result": (segment, status)}
+            return {"ui": {"text": [status]},
+                    "result": (accepted_segment, status)}
         if action == "stop":
             if ExecutionBlocker is None:
                 raise RuntimeError("This ComfyUI build does not support review blocking.")
-            status = "approved clip %d and stopped at its checkpoint" % index
+            status = ("approved clip %d and stopped at its checkpoint" % index
+                      ) + candidate_note
             partial_item = None
             if assemble_partial_on_stop:
                 try:
                     partial_path, partial_warning = _assemble_review_partial(
-                        state, segment, partial_audio_source, source_audio)
+                        accepted_state, accepted_segment,
+                        partial_audio_source, source_audio)
                     partial_item = _video_output_item(partial_path)
                     status += "; partial video: %s" % partial_path
                     if partial_warning:
@@ -5886,20 +6140,38 @@ class MiniMaxH3ChainLoopEnd:
                     "raw_frames", plan["shots"][index - 1]["raw_frames"])))
             retry_state = dict(state)
             retry_state["plan"] = revised_plan
+            candidate_batch = review.get("candidate_batch")
+            if isinstance(candidate_batch, dict):
+                retry_state["candidate_batch"] = candidate_batch
+            else:
+                retry_state.pop("candidate_batch", None)
             # Keep the predecessor context and accepted segment list unchanged.
             # Segment Save makes the new take active when this index completes
             # again while retaining the rejected take as an immutable revision.
             return self._recurse(flow, retry_state, dynprompt, unique_id)
+        selected_frames = images
+        selected_latent = sampled_latent
+        if (isinstance(review, dict)
+                and review.get("action") == "candidate_selected"):
+            selected_plan = review.get("plan")
+            selected_frames = review.get("context_frames")
+            selected_latent = review.get("sampled_latent")
+            if (not isinstance(selected_plan, dict) or selected_frames is None
+                    or not isinstance(selected_latent, dict)):
+                raise ValueError(
+                    "Selected H3 candidate is missing its continuation state.")
+            plan = selected_plan
         context_length = min(
-            _plan_context_storage_length(plan), int(images.shape[0]))
+            _plan_context_storage_length(plan), int(selected_frames.shape[0]))
         next_state = {
             "plan": plan,
             "index": index + 1,
             "range_start": int(state.get("range_start", 1)),
             "end_clip": int(state.get("end_clip", len(plan["shots"]))),
             # clone: a tensor view would retain the entire decoded clip
-            "previous_frames": _tensor_cpu_clone(images[-context_length:]),
-            "previous_latent": _compact_latent(sampled_latent),
+            "previous_frames": _tensor_cpu_clone(
+                selected_frames[-context_length:]),
+            "previous_latent": _compact_latent(selected_latent),
             "segments": list(state.get("segments", [])) +
                         [_public_segment(segment)],
             "resumed_from": state.get("resumed_from", 0),
@@ -7346,6 +7618,7 @@ async def _submit_review_decision(request):
         return web.json_response({"error": "Unknown review action."}, status=400)
 
     decision: dict[str, Any] = {"action": action}
+    selected_segment = None
     if action in ("retry", "reroll"):
         scene_prompt = str(body.get("scene_prompt") or "").strip()
         prompt_prefix = str(
@@ -7390,6 +7663,41 @@ async def _submit_review_decision(request):
                 scene_prompt, seed, raw_frames)
         except (TypeError, ValueError) as exc:
             return web.json_response({"error": str(exc)}, status=400)
+    elif action in ("approve", "stop"):
+        candidates = pending.get("candidates")
+        if (isinstance(candidates, list) and candidates
+                and (len(candidates) > 1 or body.get("candidate_revision"))):
+            requested_revision = str(
+                body.get("candidate_revision") or
+                candidates[-1].get("segment", {}).get("revision") or "")
+            selected_number = 0
+            for number, candidate in enumerate(candidates, start=1):
+                segment = candidate.get("segment") if isinstance(
+                    candidate, dict) else None
+                if (isinstance(segment, dict) and str(
+                        segment.get("revision") or "") == requested_revision):
+                    selected_segment = segment
+                    selected_number = number
+                    break
+            if selected_segment is None:
+                return web.json_response(
+                    {"error": "The selected H3 candidate is not part of this "
+                              "pending review."}, status=400)
+            try:
+                metadata, _metadata_path = _load_checkpoint_revision(
+                    str(pending["public"]["run_name"]),
+                    int(pending["public"]["clip_index"]), requested_revision)
+            except FileNotFoundError as exc:
+                return web.json_response({"error": str(exc)}, status=404)
+            except (OSError, TypeError, ValueError, json.JSONDecodeError,
+                    KeyError) as exc:
+                return web.json_response({"error": str(exc)}, status=400)
+            selected_segment = metadata["segment"]
+            decision.update({
+                "candidate_revision": requested_revision,
+                "candidate_number": selected_number,
+                "candidate_count": len(candidates),
+            })
 
     def resolve_on_execution_loop():
         if not future.done():
@@ -7401,15 +7709,26 @@ async def _submit_review_decision(request):
         return web.json_response(
             {"error": "This H3 review execution loop is no longer running."},
             status=409)
+    response_seed = (selected_segment.get("seed")
+                     if isinstance(selected_segment, dict)
+                     else decision.get("seed", pending["current_seed"]))
+    response_length = (selected_segment.get("raw_frames")
+                       if isinstance(selected_segment, dict)
+                       else decision.get(
+                           "raw_frames", pending["current_length"]))
+    response_prompt = (selected_segment.get("scene_prompt")
+                       if isinstance(selected_segment, dict)
+                       else decision.get("scene_prompt", pending.get(
+                           "public", {}).get("scene_prompt", "")))
     return web.json_response({
         "ok": True,
         "action": decision["action"],
-        "scene_prompt": str(decision.get(
-            "scene_prompt", pending.get("public", {}).get(
-                "scene_prompt", ""))),
-        "seed": str(decision.get("seed", pending["current_seed"])),
-        "length": int(decision.get(
-            "raw_frames", pending["current_length"])),
+        "scene_prompt": str(response_prompt or ""),
+        "seed": str(response_seed),
+        "length": int(response_length),
+        "candidate_revision": str(decision.get("candidate_revision") or ""),
+        "candidate_number": int(decision.get("candidate_number", 0)),
+        "candidate_count": int(decision.get("candidate_count", 0)),
     })
 
 

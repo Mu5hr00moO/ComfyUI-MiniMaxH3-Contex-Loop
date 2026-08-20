@@ -7,7 +7,7 @@ import {
     checkpointRevisionKey,
     formatCheckpointBytes,
     selectedCheckpointRevision,
-} from "./h3_checkpoint_manager_core.mjs?v=0.4.17";
+} from "./h3_checkpoint_manager_core.mjs?v=0.4.20";
 
 const NODE_NAME = "MiniMaxH3ChainCheckpointManager";
 const PLAN_NAME = "MiniMaxH3ChainPlan";
@@ -122,7 +122,7 @@ function injectStyles() {
         border-radius:7px; background:color-mix(in srgb,var(--h3cm-panel) 90%,transparent); }
       .h3cm-panel-title { display:flex; justify-content:space-between; gap:8px; margin-bottom:7px; font-weight:750; }
       .h3cm-shared-legend { color:var(--h3cm-muted); font-size:10px; font-weight:500; }
-      .h3cm-branches { position:relative; }
+      .h3cm-branches { position:relative; padding-left:28px; }
       .h3cm-branch { position:relative; z-index:1; margin-bottom:8px; padding:6px;
         border:1px solid color-mix(in srgb,var(--h3cm-border) 75%,transparent); border-radius:6px; }
       .h3cm-branch-head { justify-content:space-between; margin-bottom:5px; }
@@ -138,7 +138,8 @@ function injectStyles() {
         color:color-mix(in srgb,var(--h3cm-shared-color) 72%,var(--h3cm-text)); font-size:9px; font-weight:750; }
       .h3cm-shared-links { position:absolute; inset:0 auto auto 0; z-index:2; overflow:visible;
         pointer-events:none; }
-      .h3cm-shared-link { fill:none; stroke-width:2; stroke-dasharray:4 3; opacity:.9; }
+      .h3cm-shared-link { fill:none; stroke-width:1.5; stroke-linecap:round;
+        stroke-linejoin:round; vector-effect:non-scaling-stroke; opacity:.82; }
       .h3cm-detail { display:flex; flex-direction:column; gap:8px; }
       .h3cm-preview { width:100%; max-height:280px; min-height:150px; object-fit:contain; border-radius:6px; background:#08090c; }
       .h3cm-audio { width:100%; height:36px; }
@@ -187,7 +188,7 @@ function mount(node) {
     const main = element("div", "h3cm-main");
     const branchesPanel = element("section", "h3cm-panel");
     const branchesTitle = element("div", "h3cm-panel-title", "Revision branches");
-    branchesTitle.append(element("span", "h3cm-shared-legend", "color + vertical link = shared clip"));
+    branchesTitle.append(element("span", "h3cm-shared-legend", "matching color + side rail = same saved clip"));
     const branches = element("div", "h3cm-branches");
     branchesPanel.append(branchesTitle, branches);
     const detail = element("section", "h3cm-panel h3cm-detail");
@@ -329,20 +330,24 @@ function mount(node) {
         for (const [key, members] of grouped) {
             members.sort((left, right) =>
                 left.getBoundingClientRect().top - right.getBoundingClientRect().top);
-            for (let index = 1; index < members.length; index += 1) {
-                const previous = members[index - 1].getBoundingClientRect();
-                const current = members[index].getBoundingClientRect();
-                const x1 = previous.left + previous.width / 2 - bounds.left;
-                const y1 = previous.bottom - bounds.top;
-                const x2 = current.left + current.width / 2 - bounds.left;
-                const y2 = current.top - bounds.top;
-                const middle = y1 + (y2 - y1) / 2;
-                const link = document.createElementNS("http://www.w3.org/2000/svg", "path");
-                link.classList.add("h3cm-shared-link");
-                link.setAttribute("stroke", sharedColor(key));
-                link.setAttribute("d", `M ${x1} ${y1} C ${x1} ${middle}, ${x2} ${middle}, ${x2} ${y2}`);
-                svg.append(link);
+            const scene = Number(String(key).split(":", 1)[0]);
+            const laneX = 7 + ((Number.isFinite(scene) ? scene - 1 : 0) % 4) * 5;
+            const anchors = members.map((card) => {
+                const cardBounds = card.getBoundingClientRect();
+                return {
+                    x: Math.max(laneX, cardBounds.left - bounds.left),
+                    y: cardBounds.top + cardBounds.height / 2 - bounds.top,
+                };
+            });
+            let pathData = `M ${laneX} ${anchors[0].y} V ${anchors.at(-1).y}`;
+            for (const anchor of anchors) {
+                pathData += ` M ${laneX} ${anchor.y} H ${anchor.x}`;
             }
+            const link = document.createElementNS("http://www.w3.org/2000/svg", "path");
+            link.classList.add("h3cm-shared-link");
+            link.setAttribute("stroke", sharedColor(key));
+            link.setAttribute("d", pathData);
+            svg.append(link);
         }
         if (svg.childNodes.length) branches.prepend(svg);
     }
