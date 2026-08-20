@@ -2,6 +2,49 @@
 
 Newest first. This file keeps release history out of the onboarding README.
 
+## Unreleased — Deferred checkpoint upscaling
+
+- Added a backend-neutral recursive upscale child run: Checkpoint Manager Plan
+  passthrough → Upscale Adapter → Current Scene → H3/LTX/custom backend →
+  Segment Save → Loop End → Merger. Each profile is isolated under the parent
+  run's `upscaled/<profile>` folder with verified resume metadata.
+- Upscale Current Scene prefers an explicitly saved denoised H3 x0 and exposes
+  joint AV plus split video/audio latent routes for both combined and
+  video-only learned H3 upscaler nodes. Older terminal-latent checkpoints remain
+  supported, and decoded-video LTX 2.5 passes use the same orchestration.
+- Made persistence of the large HQ latent optional and off by default. A small
+  self-contained assembly/audio checkpoint is still written for reliable
+  resume and final merge.
+- Added a standalone learned-H3 2x example workflow that loads a complete
+  branch through Checkpoint Manager, rebuilds scene conditioning, runs a
+  Tr1dae staggered pass-2 loop, and merges the isolated child profile.
+
+## v0.4.20 — Modern editable-install metadata
+
+- Added an explicit setuptools build backend and disabled accidental discovery
+  of asset and workflow folders as Python packages, so `pip install -e .`
+  succeeds with current setuptools releases.
+- Replaced deprecated license metadata with its SPDX form while leaving the
+  repository's GPL v3 license text unchanged. Thanks to @ed45626 in PR #27.
+
+## v0.4.19 — Cleaner shared-checkpoint links
+
+- Moved shared-revision connectors into a dedicated side gutter with thin
+  solid rails and short taps to each matching card, keeping lineage marks away
+  from branch names, revision text, and status labels.
+
+## v0.4.18 — Review candidate batches and checkpoint refresh
+
+- Review Gate can now generate 1–20 different-seed takes for each scene,
+  present them together, and continue from the exact saved video/audio
+  checkpoint selected by the user. The default remains one take.
+- Selecting an earlier take atomically promotes its checkpoint and recovery
+  Plan before the loop continues, so later scenes and interrupted-run recovery
+  follow the chosen branch rather than the last generated take.
+- Fixed overlapping checkpoint refresh requests adding duplicate choices after
+  workflow reload, and clarified that rejected, rerolled, and candidate takes
+  remain as intentional immutable recovery revisions until explicitly deleted.
+
 ## v0.4.17 — Shared checkpoint lineage visibility
 
 - Repeated checkpoint revisions now keep the existing branch layout while

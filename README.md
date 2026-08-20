@@ -104,7 +104,10 @@ For a first run:
 3. Choose an audio mode. For a prerecorded song, connect the same full track to
    Loop Start, Current Shot, and Assemble.
 4. Queue the workflow. Review Gate pauses after every safely saved scene.
-5. Approve, edit and retry, reroll the seed, or approve and stop.
+5. Approve, edit and retry, reroll the seed, or approve and stop. To compare
+   several takes per scene, set Review Gate's optional `candidate_count` above
+   1 (or convert it to an input and connect an INT node); the Gate generates
+   the candidates automatically and continues from the exact take you select.
 6. Assemble the completed or partial manifest.
 
 Existing output files are preserved. Assemble adds `_001`, `_002`, and so on
@@ -253,10 +256,13 @@ scene, and retain the same dependencies. A bounded `scene_range` accepts one
 scene (`3`) or one continuous range (`3:8`).
 
 Checkpoint Manager identifies saved takes by scene and inferred branch,
-previews their media and exact video/audio dependencies, and safely deletes
-inactive leaves one revision at a time. Run Manager restores archived prompts
-and Plan settings and can archive loader-backed image/audio/video assets under
-the run folder. See
+previews their media and exact video/audio dependencies, can load a complete
+branch back into the connected Plan, and safely deletes inactive leaves one
+revision at a time. Its Plan output can also launch a deferred, checkpoint-backed
+upscale child loop. Each profile is isolated under `upscaled/<profile>` and the
+large HQ sampler latent is optional. Run Manager restores archived prompts and
+Plan settings and can archive loader-backed image/audio/video assets under the
+run folder. See
 [Runs, review, and recovery](docs/RUNS_AND_RECOVERY.md).
 
 ## Documentation
@@ -271,7 +277,8 @@ the run folder. See
 - [Audio and continuity](docs/AUDIO_AND_CONTINUITY.md) — audio modes, 15.070 s
   reference alignment, generated WAVs, trimming, and seam diagnostics.
 - [Runs, review, and recovery](docs/RUNS_AND_RECOVERY.md) — Review Gate,
-  Checkpoint Manager, Run Manager assets, partial output, and PNG export.
+  Checkpoint Manager, deferred upscale child runs, Run Manager assets, partial
+  output, and PNG export.
 - [Advanced workflows](docs/ADVANCED_WORKFLOWS.md) — existing-video extension,
   long context, last-frame targets, and performance re-filming.
 - [Compatibility](docs/COMPATIBILITY.md) — patch ownership, native guides,

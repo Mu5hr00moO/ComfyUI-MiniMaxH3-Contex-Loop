@@ -109,30 +109,21 @@ def main():
     async def review_route_check():
         token = "review-route-smoke"
         future = asyncio.get_running_loop().create_future()
-        plan = chain._normalize_plan(
-            json.dumps({
-                "prompt_prefix": "Shared only.",
-                "shots": [{
-                    "id": "review",
-                    "prompt": "",
-                    "length": 39,
-                    "seed": 7,
-                }],
-            }),
-            run_name="review-route-smoke",
-            width=32,
-            height=32,
-            context_length=22,
-            encode_mode="video",
-            anchor_mode="head",
-            crop="disabled",
-            audio_mode="source_track",
-            audio_context_length=0,
-            default_duration_seconds=15,
-            default_steps=2,
-            base_seed=0,
-            segment_crf=30,
-        )
+        review_plan = package.NODE_CLASS_MAPPINGS[
+            "MiniMaxH3ChainPlan"]().build(
+                json.dumps({
+                    "prompt_prefix": "Shared only.",
+                    "shots": [{
+                        "id": "review_route",
+                        "prompt": "Original scene prompt.",
+                        "length": 22,
+                        "steps": 8,
+                        "seed": "7",
+                    }],
+                }),
+                "review_route_smoke", "", 64, 64, 22,
+                "video", "head", "disabled", "generated_audio", 22,
+                1.0, 8, 0, 18, 0, "guide")[0]
         chain._PENDING_REVIEWS[token] = {
             "future": future,
             "loop": asyncio.get_running_loop(),
@@ -141,9 +132,9 @@ def main():
                 "prompt_prefix": "Shared only.",
                 "clip_index": 1,
             },
-            "plan": plan,
+            "plan": review_plan,
             "current_seed": 7,
-            "current_length": 39,
+            "current_length": 22,
         }
 
         class Request:

@@ -570,6 +570,73 @@ def validate_sequential_motion_ref(path):
     return workflow, plan
 
 
+def validate_deferred_h3_upscale(path):
+    workflow = load(path)
+    validate_links(workflow)
+    node_types = {item.get("type") for item in workflow["nodes"]}
+    required = {
+        "MiniMaxH3ChainCheckpointManager",
+        "MiniMaxH3ChainUpscaleAdapter",
+        "MiniMaxH3ChainUpscaleCurrent",
+        "MiniMaxH3LatentUpscaleCombined",
+        "MiniMaxH3Pass2StaggeredScheduler",
+        "SamplerCustomAdvanced",
+        "MiniMaxH3ChainUpscaleSegmentSave",
+        "MiniMaxH3ChainUpscaleLoopEnd",
+        "MiniMaxH3ChainUpscaleMerge",
+    }
+    assert required <= node_types
+    assert "MiniMaxH3ChainLoopStart" not in node_types
+    assert "MiniMaxH3ChainContext" not in node_types
+
+    manager = node(workflow, "MiniMaxH3ChainCheckpointManager")
+    adapter = node(workflow, "MiniMaxH3ChainUpscaleAdapter")
+    current = node(workflow, "MiniMaxH3ChainUpscaleCurrent")
+    combined = node(workflow, "MiniMaxH3LatentUpscaleCombined")
+    scheduler = node(workflow, "MiniMaxH3Pass2StaggeredScheduler")
+    sampler = node(workflow, "SamplerCustomAdvanced")
+    saver = node(workflow, "MiniMaxH3ChainUpscaleSegmentSave")
+    loop_end = node(workflow, "MiniMaxH3ChainUpscaleLoopEnd")
+    merger = node(workflow, "MiniMaxH3ChainUpscaleMerge")
+
+    assert socket(manager["outputs"], "plan")["links"] == [
+        socket(adapter["inputs"], "plan")["link"]]
+    assert adapter["widgets_values"][0:2] == ["h3_learned_2x", "h3_latent"]
+    assert adapter["widgets_values"][3:7] == [1, 0, False, 18]
+    assert socket(adapter["outputs"], "flow")["links"] == [
+        socket(loop_end["inputs"], "flow")["link"]]
+    assert socket(current["outputs"], "source_latent")["links"] == [
+        socket(combined["inputs"], "samples")["link"]]
+    for output_name, input_name in (
+            ("prompt", "prompt"), ("width", "width"),
+            ("height", "height"), ("raw_frames", "length")):
+        conditioner = node(workflow, "MiniMaxH3ImageToVideo")
+        assert socket(current["outputs"], output_name)["links"] == [
+            socket(conditioner["inputs"], input_name)["link"]]
+    assert scheduler["widgets_values"] == [
+        4, 0.45, 7.0, "karras", 8, "normal"]
+    assert combined["widgets_values"][0] == "learned model"
+    assert combined["widgets_values"][2:] == [0.0, "independent", 0.0]
+    guider = node(workflow, "BasicGuider")
+    assert socket(combined["outputs"], "positive")["links"] == [
+        socket(guider["inputs"], "conditioning")["link"]]
+    assert node(workflow, "KSamplerSelect")["widgets_values"] == ["euler"]
+    assert socket(sampler["outputs"], "output")["links"]
+    assert socket(saver["inputs"], "images")["link"] is not None
+    assert socket(saver["inputs"], "upscaled_latent")["link"] is not None
+    assert socket(loop_end["inputs"], "images")["link"] is not None
+    assert socket(loop_end["inputs"], "upscaled_latent")["link"] is not None
+    assert socket(loop_end["outputs"], "manifest")["links"] == [
+        socket(merger["inputs"], "manifest")["link"]]
+    notes = "\n".join(
+        str(item.get("widgets_values", [""])[0])
+        for item in workflow["nodes"] if item.get("type") == "Note")
+    assert "Load selected branch" in notes
+    assert "save_latent is OFF" in notes
+    assert "ComfyUI-MiniMaxH3_LatentUpscaler" in notes
+    return workflow
+
+
 def main():
     assert EXAMPLES.joinpath("README.md").is_file()
     assert ARCHIVE.joinpath("README.md").is_file()
@@ -589,6 +656,8 @@ def main():
         EXAMPLES / "MiniMax H3 Ref2V - Studio Tagged Source Audio.json")
     sequential_path = (
         EXAMPLES / "EXPERIMENTAL MiniMax H3 Ref2V - Sequential Motion.json")
+    deferred_upscale_path = (
+        EXAMPLES / "MiniMax H3 Deferred Upscale - H3 Learned 2x.json")
     assert set(path.name for path in EXAMPLES.glob("*.json")) == {
         t2v_normal_path.name, t2v_studio_path.name,
         i2v_normal_path.name, i2v_studio_path.name,
@@ -596,9 +665,12 @@ def main():
         ref2v_tagged_path.name, ref2v_studio_path.name,
         ref2v_source_audio_path.name,
         sequential_path.name,
+        deferred_upscale_path.name,
     }
     for path in EXAMPLES.glob("*.json"):
         workflow = load(path)
+        if path == deferred_upscale_path:
+            continue
         context = node(workflow, "MiniMaxH3ChainContext")
         sampler = node(workflow, "SamplerCustomAdvanced")
         assert socket(context["outputs"], "latent")["links"] == [
@@ -633,6 +705,7 @@ def main():
     ]
     sequential, _sequential_plan = validate_sequential_motion_ref(
         sequential_path)
+    deferred_upscale = validate_deferred_h3_upscale(deferred_upscale_path)
 
     def generation_types(workflow):
         return collections.Counter(
@@ -653,9 +726,9 @@ def main():
         for workflow in (
             t2v_normal, t2v_studio, i2v_normal, i2v_studio, fl2v_normal,
             ref2v_basic, ref2v_tagged, ref2v_studio, ref2v_source_audio,
-            sequential)
+            sequential, deferred_upscale)
     }
-    assert len(uuids) == 10
+    assert len(uuids) == 11
 
     asset = EXAMPLES / "assets" / "jigen_market_garden_doom_opening.png"
     assert asset.is_file()
@@ -667,7 +740,8 @@ def main():
 
     print("H3 workflow catalog: T2VA, I2VA, indexed A-B-A FL2VA, Basic / "
           "Tagged / Studio Tagged / source-timeline audio Ref2VA, and "
-          "experimental sequential motion Ref2VA; valid links, bundled "
+          "experimental sequential motion Ref2VA, and deferred learned H3 2x; "
+          "valid links, bundled "
           "assets, timeline wiring, six-section prompts, restoration, and "
           "attribution pass")
 
