@@ -81,6 +81,40 @@ def main() -> None:
     assert [index for index, _image in resolved] == [80, 123]
     assert resolved[0][1] is image_a
     assert resolved[1][1] is image_b
+    image_c: object = object()
+    image_d: object = object()
+
+    scene_chain = (
+        {"image": image_a, "frame_index": 0, "scene_index": 1},
+        {"image": image_b, "frame_index": -1, "scene_index": 1},
+        {"image": image_d, "frame_index": -1, "scene_index": 2},
+        {"image": image_c, "frame_index": 80, "scene_index": 2},
+    )
+
+    state_scene_2 = {
+        "index": 2,
+        "plan": {
+            "shots": [{}, {}],
+        },
+    }
+
+    scene_2_guides = module.MiniMaxH3GuideImagesToVideo._select_scene_guides(
+        scene_chain,
+        state_scene_2,
+    )
+
+    resolved_scene_2 = module.MiniMaxH3GuideImagesToVideo._resolve_guides(
+        scene_2_guides,
+        124,
+    )
+
+    assert [index for index, _image in resolved_scene_2] == [0, 80, 123]
+    assert resolved_scene_2[0][1] is image_b
+    assert resolved_scene_2[1][1] is image_c
+    assert resolved_scene_2[2][1] is image_d
+
+    assert scene_2_guides[0]["image"] is image_b
+
 
     reversed_chain = (
         {"image": image_b, "frame_index": -1},

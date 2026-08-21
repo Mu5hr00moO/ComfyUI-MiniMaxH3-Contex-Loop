@@ -16,6 +16,7 @@ import nodes as comfy_nodes
 FPS: Final[int] = 24
 AUDIO_LATENT_FPS: Final[int] = 40
 GUIDE_IMAGES_TYPE: Final[str] = "MINIMAX_H3_GUIDE_IMAGES"
+STATE_TYPE: Final[str] = "H3_CHAIN_STATE"
 
 
 class GuideImageSpec(TypedDict):
@@ -235,6 +236,12 @@ class MiniMaxH3GuideImagesToVideo:
                         ),
                     },
                 ),
+                "state": (
+                    STATE_TYPE,
+                    {
+                        "tooltip": "Current H3 chain state used to resolve scene-local guides.",
+                    },
+                ),
             },
             "optional": {
                 "guide_images": (
@@ -269,11 +276,16 @@ class MiniMaxH3GuideImagesToVideo:
         width: int,
         height: int,
         length: int,
+        state: dict[str, Any],
         guide_images: GuideImageChain | None = None,
     ) -> tuple[Any, dict[str, Any]]:
         latent, frame_count = _empty_av_latent(width, height, length)
-        resolved_guides: list[ResolvedGuide] = self._resolve_guides(
+        scene_guides: GuideImageChain = self._select_scene_guides(
             guide_images or (),
+            state,
+        )
+        resolved_guides: list[ResolvedGuide] = self._resolve_guides(
+            scene_guides,
             frame_count,
         )
 
@@ -308,6 +320,107 @@ class MiniMaxH3GuideImagesToVideo:
             )
 
         return conditioning, latent
+
+    @staticmethod
+    def _select_scene_guides(
+        guide_images: GuideImageChain,
+        state: dict[str, Any],
+    ) -> GuideImageChain:
+        """Return only the guides that apply to the current chain scene."""
+        if not isinstance(state, dict) or not isinstance(state.get("plan"), dict):
+            raise ValueError("Guide Images to Video requires a valid H3 Chain state.")
+
+        shots: Any = state["plan"].get("shots")
+        if not isinstance(shots, list) or not shots:
+            raise ValueError("H3 Chain state does not contain a valid scene plan.")
+
+        scene_index: int = int(state.get("index", -1))
+        scene_count: int = len(shots)
+
+        if scene_index < 1 or scene_index > scene_count:
+            raise ValueError(
+                f"H3 Chain state scene index {scene_index} is outside "
+                f"the plan's 1..{scene_count} range."
+            )
+
+        current_guides: list[GuideImageSpec] = []
+        previous_end: GuideImageSpec | None = None
+        used_keys: set[tuple[int, int]] = set()
+
+        for item in guide_images:
+            item_scene_raw: int | None = item.get("scene_index")
+            if item_scene_raw is None:
+                raise ValueError(
+                    "Every scene-aware guide image requires a scene_index."
+                )
+
+            item_scene: int = int(item_scene_raw)
+            frame_index: int = int(item["frame_index"])
+
+            if item_scene < 1 or item_scene > scene_count:
+                raise ValueError(
+                    f"Guide scene_index {item_scene} is outside "
+                    f"the plan's 1..{scene_count} range."
+                )
+
+            if frame_index < -1:
+                raise ValueError(
+                    f"Invalid guide frame_index {frame_index} for scene "
+                    f"{item_scene}. Only non-negative indices and -1 are supported."
+                )
+
+            key: tuple[int, int] = (item_scene, frame_index)
+            if key in used_keys:
+                raise ValueError(
+                    f"More than one guide image targets scene {item_scene}, "
+                    f"frame {frame_index}."
+                )
+            used_keys.add(key)
+
+            if item_scene == scene_index:
+                current_guides.append(item)
+
+            if (
+                scene_index > 1
+                and item_scene == scene_index - 1
+                and frame_index == -1
+            ):
+                previous_end = item
+
+        if scene_index == 1:
+            if not any(int(item["frame_index"]) == 0 for item in current_guides):
+                raise ValueError("Scene 1 requires an explicit guide at frame 0.")
+        else:
+            if previous_end is None:
+                raise ValueError(
+                    f"Scene {scene_index} requires the frame -1 guide from "
+                    f"scene {scene_index - 1} as its inherited start."
+                )
+
+            if any(int(item["frame_index"]) == 0 for item in current_guides):
+                raise ValueError(
+                    f"Scene {scene_index} defines an explicit frame 0 guide, "
+                    f"but scene {scene_index - 1} already provides its "
+                    "inherited start guide."
+                )
+
+            inherited: GuideImageSpec = {
+                "image": previous_end["image"],
+                "frame_index": 0,
+                "scene_index": scene_index,
+            }
+            current_guides.insert(0, inherited)
+
+        if (
+            scene_index < scene_count
+            and not any(int(item["frame_index"]) == -1 for item in current_guides)
+        ):
+            raise ValueError(
+                f"Scene {scene_index} requires a guide at frame -1 because "
+                "another scene follows it."
+            )
+
+        return tuple(current_guides)
 
     @staticmethod
     def _resolve_guides(
