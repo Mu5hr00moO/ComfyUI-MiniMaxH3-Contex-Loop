@@ -94,7 +94,16 @@ def main() -> None:
     state_scene_2 = {
         "index": 2,
         "plan": {
-            "shots": [{}, {}],
+            "shots": [
+                {
+                    "raw_frames": 124,
+                    "delivered_frames": 124,
+                },
+                {
+                    "raw_frames": 124,
+                    "delivered_frames": 102,
+                },
+            ],
         },
     }
 
@@ -115,6 +124,25 @@ def main() -> None:
 
     assert scene_2_guides[0]["image"] is image_b
 
+    raw_scene_2_guides, prefix_frames = (
+        module.MiniMaxH3GuideImagesToVideo._map_visible_guides_to_raw(
+            scene_2_guides,
+            state_scene_2,
+            124,
+        )
+    )
+
+    assert prefix_frames == 22
+
+    resolved_scene_2 = module.MiniMaxH3GuideImagesToVideo._resolve_guides(
+        raw_scene_2_guides,
+        124,
+    )
+
+    assert [index for index, _image in resolved_scene_2] == [22, 102, 123]
+    assert resolved_scene_2[0][1] is image_b
+    assert resolved_scene_2[1][1] is image_c
+    assert resolved_scene_2[2][1] is image_d
 
     reversed_chain = (
         {"image": image_b, "frame_index": -1},

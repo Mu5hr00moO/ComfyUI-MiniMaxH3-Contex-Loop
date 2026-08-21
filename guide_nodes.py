@@ -284,8 +284,13 @@ class MiniMaxH3GuideImagesToVideo:
             guide_images or (),
             state,
         )
-        resolved_guides: list[ResolvedGuide] = self._resolve_guides(
+        raw_scene_guides, visible_start_raw_index = self._map_visible_guides_to_raw(
             scene_guides,
+            state,
+            frame_count,
+        )
+        resolved_guides: list[ResolvedGuide] = self._resolve_guides(
+            raw_scene_guides,
             frame_count,
         )
 
@@ -293,7 +298,11 @@ class MiniMaxH3GuideImagesToVideo:
         keyframes: list[dict[str, Any]] = []
 
         for resolved_index, image in resolved_guides:
-            crop: str = "disabled" if resolved_index == 0 else "center"
+            crop: str = (
+                "disabled"
+                if resolved_index == visible_start_raw_index
+                else "center"
+            )
             resized: torch.Tensor = _resize_image(
                 image[:1],
                 width,
@@ -421,6 +430,56 @@ class MiniMaxH3GuideImagesToVideo:
             )
 
         return tuple(current_guides)
+
+    @staticmethod
+    def _map_visible_guides_to_raw(
+        guide_images: GuideImageChain,
+        state: dict[str, Any],
+        frame_count: int,
+    ) -> tuple[GuideImageChain, int]:
+        """Map visible scene guide indices onto the raw generation timeline."""
+        scene_index: int = int(state["index"])
+        shot: dict[str, Any] = state["plan"]["shots"][scene_index - 1]
+
+        raw_frames: int = int(shot["raw_frames"])
+        delivered_frames: int = int(shot["delivered_frames"])
+
+        if raw_frames != frame_count:
+            raise ValueError(
+                f"Scene {scene_index} expects {raw_frames} raw frames, "
+                f"but Guide Images to Video created {frame_count}."
+            )
+
+        if delivered_frames < 1 or delivered_frames > raw_frames:
+            raise ValueError(
+                f"Scene {scene_index} has invalid delivered frame count "
+                f"{delivered_frames} for {raw_frames} raw frames."
+            )
+
+        prefix_frames: int = raw_frames - delivered_frames
+        mapped: list[GuideImageSpec] = []
+
+        for item in guide_images:
+            frame_index: int = int(item["frame_index"])
+            visible_index: int = (
+                delivered_frames - 1 if frame_index == -1 else frame_index
+            )
+
+            if visible_index < 0 or visible_index >= delivered_frames:
+                raise ValueError(
+                    f"Guide frame_index {frame_index} for scene {scene_index} "
+                    f"is outside the visible scene's {delivered_frames} frames."
+                )
+
+            mapped.append(
+                {
+                    "image": item["image"],
+                    "frame_index": prefix_frames + visible_index,
+                    "scene_index": item["scene_index"],
+                }
+            )
+
+        return tuple(mapped), prefix_frames
 
     @staticmethod
     def _resolve_guides(
