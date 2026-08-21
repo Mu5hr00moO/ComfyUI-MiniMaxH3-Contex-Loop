@@ -71,10 +71,12 @@ def main() -> None:
     image_a: object = object()
     image_b: object = object()
     builder = module.MiniMaxH3GuideImage()
-    first = builder.build(image_a, 80)[0]
-    chain = builder.build(image_b, -1, first)[0]
+    first = builder.build(image_a, 80, scene_index=1)[0]
+    chain = builder.build(image_b, -1, first, scene_index=2)[0]
 
     assert len(chain) == 2
+    assert chain[0]["scene_index"] == 1
+    assert chain[1]["scene_index"] == 2
     resolved = module.MiniMaxH3GuideImagesToVideo._resolve_guides(chain, 124)
     assert [index for index, _image in resolved] == [80, 123]
     assert resolved[0][1] is image_a

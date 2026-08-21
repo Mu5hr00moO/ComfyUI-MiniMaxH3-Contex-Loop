@@ -23,6 +23,7 @@ class GuideImageSpec(TypedDict):
 
     image: torch.Tensor
     frame_index: int
+    scene_index: int | None
 
 
 GuideImageChain: TypeAlias = tuple[GuideImageSpec, ...]
@@ -121,6 +122,16 @@ class MiniMaxH3GuideImage:
                 ),
             },
             "optional": {
+                "scene_index": (
+                    "INT",
+                    {
+                        "default": 1,
+                        "min": 1,
+                        "max": 9999,
+                        "step": 1,
+                        "tooltip": "One-based scene number for this guide image.",
+                    },
+                ),
                 "guide_images": (
                     GUIDE_IMAGES_TYPE,
                     {
@@ -149,11 +160,13 @@ class MiniMaxH3GuideImage:
         image: torch.Tensor,
         frame_index: int,
         guide_images: GuideImageChain | None = None,
+        scene_index: int | None = None,
     ) -> tuple[GuideImageChain]:
         chain: GuideImageChain = tuple(guide_images or ())
         item: GuideImageSpec = {
             "image": image,
             "frame_index": int(frame_index),
+            "scene_index": None if scene_index is None else int(scene_index),
         }
         return (chain + (item,),)
 
