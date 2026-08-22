@@ -554,17 +554,21 @@ export function calculatePlanTiming(plan, settings = {}) {
             continuationMode = sceneContinuationMode(
                 shot, planContinuationMode,
             );
-            if (sceneContext > 0 && continuationMode === "masked_av") {
+            if (sceneContext > 0
+                    && ["latent_guide", "masked_av"].includes(continuationMode)) {
+                const continuationLabel = continuationMode === "latent_guide"
+                    ? "Latent Guide"
+                    : "Masked AV";
                 if (sceneContext < 5) {
                     rowErrors.push(
-                        "Masked AV requires a context length of at least 5 frames.",
+                        `${continuationLabel} requires a context length of at least 5 frames.`,
                     );
                 }
                 if (encodeMode !== "video") {
-                    rowErrors.push("Masked AV requires video encode mode.");
+                    rowErrors.push(`${continuationLabel} requires video encode mode.`);
                 }
                 if (anchorMode !== "head") {
-                    rowErrors.push("Masked AV requires head anchor mode.");
+                    rowErrors.push(`${continuationLabel} requires head anchor mode.`);
                 }
             }
         } catch (error) {
@@ -599,7 +603,7 @@ export function calculatePlanTiming(plan, settings = {}) {
             deliveredSeconds: deliveredFrames / FPS,
             generationStartFrame,
             contextLength: sceneContext,
-            audioContextLength: continuationMode === "masked_av"
+            audioContextLength: ["latent_guide", "masked_av"].includes(continuationMode)
                 ? sceneContext : sceneAudioContext,
             continuationMode,
             errors: rowErrors,

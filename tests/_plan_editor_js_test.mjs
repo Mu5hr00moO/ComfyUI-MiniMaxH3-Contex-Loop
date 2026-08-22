@@ -196,6 +196,22 @@ assert.match(calculatePlanTiming(mixedContinuationPlan, {
     defaultDurationSeconds: 5,
 }).errors.join("\n"), /Masked AV requires/);
 
+assert.match(calculatePlanTiming({shots: [
+    {id: "one", prompt: "One.", length: 192},
+    {
+        id: "latent",
+        prompt: "Continue.",
+        length: 192,
+        continuation_mode: "latent_guide",
+    },
+]}, {
+    contextLength: 1,
+    encodeMode: "frames",
+    anchorMode: "before",
+    continuationMode: "guide",
+    defaultDurationSeconds: 5,
+}).errors.join("\n"), /Latent Guide requires/);
+
 const mixedContextTiming = calculatePlanTiming({shots: [
     {id: "one", prompt: "One.", length: 192},
     {id: "clean", prompt: "Clean.", length: 192, context_length: 0,
