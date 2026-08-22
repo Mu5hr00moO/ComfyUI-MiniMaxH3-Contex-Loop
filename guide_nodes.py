@@ -17,6 +17,7 @@ FPS: Final[int] = 24
 AUDIO_LATENT_FPS: Final[int] = 40
 GUIDE_IMAGES_TYPE: Final[str] = "MINIMAX_H3_GUIDE_IMAGES"
 STATE_TYPE: Final[str] = "H3_CHAIN_STATE"
+LOG_PREFIX: Final[str] = "[MiniMaxH3GuideImages]"
 
 
 class GuideImageSpec(TypedDict):
@@ -25,10 +26,11 @@ class GuideImageSpec(TypedDict):
     image: torch.Tensor
     frame_index: int
     scene_index: int | None
+    label: str | None
 
 
 GuideImageChain: TypeAlias = tuple[GuideImageSpec, ...]
-ResolvedGuide: TypeAlias = tuple[int, torch.Tensor]
+ResolvedGuide: TypeAlias = tuple[int, GuideImageSpec]
 
 
 def _align_frame_count(frame_count: int) -> int:
@@ -95,6 +97,26 @@ def _resize_image(
     return samples.movedim(1, -1)
 
 
+def _log(verbose: bool, message: str) -> None:
+    """Emit verbose guide-node logs when requested."""
+    if verbose:
+        print(f"{LOG_PREFIX} {message}")
+
+
+def _guide_label(item: GuideImageSpec) -> str:
+    """Return a human-readable guide label for logging."""
+    label: str | None = item.get("label")
+    if isinstance(label, str) and label.strip():
+        return label.strip()
+
+    scene_index: int | None = item.get("scene_index")
+    frame_index: int = int(item["frame_index"])
+
+    if scene_index is None:
+        return f"frame {frame_index}"
+    return f"scene {int(scene_index)} frame {frame_index}"
+
+
 class MiniMaxH3GuideImage:
     """Append one image anchor to a chain of MiniMax H3 guide images."""
 
@@ -133,6 +155,14 @@ class MiniMaxH3GuideImage:
                         "tooltip": "One-based scene number for this guide image.",
                     },
                 ),
+                "label": (
+                    "STRING",
+                    {
+                        "default": "",
+                        "multiline": False,
+                        "tooltip": "Optional human-readable label used by verbose logging.",
+                    },
+                ),
                 "guide_images": (
                     GUIDE_IMAGES_TYPE,
                     {
@@ -162,12 +192,14 @@ class MiniMaxH3GuideImage:
         frame_index: int,
         guide_images: GuideImageChain | None = None,
         scene_index: int | None = None,
+        label: str = "",
     ) -> tuple[GuideImageChain]:
         chain: GuideImageChain = tuple(guide_images or ())
         item: GuideImageSpec = {
             "image": image,
             "frame_index": int(frame_index),
             "scene_index": None if scene_index is None else int(scene_index),
+            "label": label.strip() or None,
         }
         return (chain + (item,),)
 
@@ -236,14 +268,24 @@ class MiniMaxH3GuideImagesToVideo:
                         ),
                     },
                 ),
-                "state": (
-                    STATE_TYPE,
+                "verbose": (
+                    "BOOLEAN",
                     {
-                        "tooltip": "Current H3 chain state used to resolve scene-local guides.",
+                        "default": False,
+                        "tooltip": "Log guide selection, visible-to-raw mapping, and keyframe attachment details.",
                     },
                 ),
             },
             "optional": {
+                "state": (
+                    STATE_TYPE,
+                    {
+                        "tooltip": (
+                            "Optional H3 chain state. When omitted, guide images "
+                            "are resolved directly on the generated clip timeline."
+                        ),
+                    },
+                ),
                 "guide_images": (
                     GUIDE_IMAGES_TYPE,
                     {
@@ -276,28 +318,70 @@ class MiniMaxH3GuideImagesToVideo:
         width: int,
         height: int,
         length: int,
-        state: dict[str, Any],
+        state: dict[str, Any] | None = None,
+        verbose: bool = False,
         guide_images: GuideImageChain | None = None,
     ) -> tuple[Any, dict[str, Any]]:
+        scene_index: int = int(state.get("index", -1)) if state is not None else 0
         latent, frame_count = _empty_av_latent(width, height, length)
-        scene_guides: GuideImageChain = self._select_scene_guides(
-            guide_images or (),
-            state,
+        _log(
+            verbose,
+            f"scene {scene_index}: created empty AV latent for width={width}, "
+            f"height={height}, requested_length={length}, raw_frames={frame_count}",
         )
-        raw_scene_guides, visible_start_raw_index = self._map_visible_guides_to_raw(
-            scene_guides,
-            state,
-            frame_count,
-        )
+
+        if state is None:
+            raw_scene_guides: GuideImageChain = tuple(guide_images or ())
+            visible_start_raw_index: int = 0
+        else:
+            scene_guides: GuideImageChain = self._select_scene_guides(
+                guide_images or (),
+                state,
+            )
+            _log(
+                verbose,
+                f"scene {scene_index}: selected {len(scene_guides)} effective guide(s)",
+            )
+            for item in scene_guides:
+                _log(
+                    verbose,
+                    f"scene {scene_index}: effective guide '{_guide_label(item)}' at visible frame {int(item['frame_index'])}",
+                )
+
+            raw_scene_guides, visible_start_raw_index = self._map_visible_guides_to_raw(
+                scene_guides,
+                state,
+                frame_count,
+            )
+            shot: dict[str, Any] = state["plan"]["shots"][scene_index - 1]
+            raw_frames: int = int(shot["raw_frames"])
+            delivered_frames: int = int(shot["delivered_frames"])
+            prefix_frames: int = raw_frames - delivered_frames
+            _log(
+                verbose,
+                f"scene {scene_index}: raw_frames={raw_frames}, delivered_frames={delivered_frames}, prefix_frames={prefix_frames}",
+            )
+            for visible_item, raw_item in zip(scene_guides, raw_scene_guides):
+                _log(
+                    verbose,
+                    f"scene {scene_index}: mapped guide '{_guide_label(visible_item)}' visible {int(visible_item['frame_index'])} -> raw {int(raw_item['frame_index'])}",
+                )
+
         resolved_guides: list[ResolvedGuide] = self._resolve_guides(
             raw_scene_guides,
             frame_count,
         )
+        for resolved_index, item in resolved_guides:
+            _log(
+                verbose,
+                f"scene {scene_index}: resolved guide '{_guide_label(item)}' -> resolved_frame_index {resolved_index}",
+            )
 
         prompt_images: list[torch.Tensor] = []
         keyframes: list[dict[str, Any]] = []
 
-        for resolved_index, image in resolved_guides:
+        for resolved_index, item in resolved_guides:
+            image: torch.Tensor = item["image"]
             crop: str = (
                 "disabled"
                 if resolved_index == visible_start_raw_index
@@ -310,6 +394,25 @@ class MiniMaxH3GuideImagesToVideo:
                 crop,
             )
             prompt_images.append(resized)
+
+            inherited_start: bool = (
+                state is not None
+                and scene_index > 1
+                and resolved_index == visible_start_raw_index
+            )
+            if inherited_start:
+                _log(
+                    verbose,
+                    f"scene {scene_index}: inherited start guide '{_guide_label(item)}' "
+                    f"at raw frame {resolved_index} kept as prompt image only; "
+                    "temporal keyframe skipped",
+                )
+                continue
+
+            _log(
+                verbose,
+                f"scene {scene_index}: attach guide '{_guide_label(item)}' at raw frame {resolved_index} with crop={crop}",
+            )
             keyframes.append(
                 {
                     "resolved_frame_index": resolved_index,
@@ -317,12 +420,24 @@ class MiniMaxH3GuideImagesToVideo:
                 }
             )
 
+        _log(
+            verbose,
+            f"scene {scene_index}: tokenize prompt with {len(prompt_images)} image(s)",
+        )
         tokens: Any = clip.tokenize(prompt, images=prompt_images)
         conditioning: Any = clip.encode_from_tokens_scheduled(tokens)
 
         if keyframes:
             for keyframe in keyframes:
+                _log(
+                    verbose,
+                    f"scene {scene_index}: encode keyframe at raw frame {int(keyframe['resolved_frame_index'])}",
+                )
                 keyframe["latent"] = vae.encode(keyframe.pop("image"))
+            _log(
+                verbose,
+                f"scene {scene_index}: attach {len(keyframes)} minimax_keyframe(s)",
+            )
             conditioning = node_helpers.conditioning_set_values(
                 conditioning,
                 {"minimax_keyframes": keyframes},
@@ -417,6 +532,7 @@ class MiniMaxH3GuideImagesToVideo:
                 "image": previous_end["image"],
                 "frame_index": 0,
                 "scene_index": scene_index,
+                "label": previous_end.get("label"),
             }
             current_guides.insert(0, inherited)
 
@@ -476,6 +592,7 @@ class MiniMaxH3GuideImagesToVideo:
                     "image": item["image"],
                     "frame_index": prefix_frames + visible_index,
                     "scene_index": item["scene_index"],
+                    "label": item.get("label"),
                 }
             )
 
@@ -509,7 +626,7 @@ class MiniMaxH3GuideImagesToVideo:
                 )
 
             used_indices.add(resolved_index)
-            resolved.append((resolved_index, item["image"]))
+            resolved.append((resolved_index, item))
 
         resolved.sort(key=lambda item: item[0])
         return resolved

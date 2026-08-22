@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import os
 import sys
 import types
@@ -78,9 +80,9 @@ def main() -> None:
     assert chain[0]["scene_index"] == 1
     assert chain[1]["scene_index"] == 2
     resolved = module.MiniMaxH3GuideImagesToVideo._resolve_guides(chain, 124)
-    assert [index for index, _image in resolved] == [80, 123]
-    assert resolved[0][1] is image_a
-    assert resolved[1][1] is image_b
+    assert [index for index, _item in resolved] == [80, 123]
+    assert resolved[0][1]["image"] is image_a
+    assert resolved[1][1]["image"] is image_b
     image_c: object = object()
     image_d: object = object()
 
@@ -117,10 +119,10 @@ def main() -> None:
         124,
     )
 
-    assert [index for index, _image in resolved_scene_2] == [0, 80, 123]
-    assert resolved_scene_2[0][1] is image_b
-    assert resolved_scene_2[1][1] is image_c
-    assert resolved_scene_2[2][1] is image_d
+    assert [index for index, _item in resolved_scene_2] == [0, 80, 123]
+    assert resolved_scene_2[0][1]["image"] is image_b
+    assert resolved_scene_2[1][1]["image"] is image_c
+    assert resolved_scene_2[2][1]["image"] is image_d
 
     assert scene_2_guides[0]["image"] is image_b
 
@@ -139,10 +141,10 @@ def main() -> None:
         124,
     )
 
-    assert [index for index, _image in resolved_scene_2] == [22, 102, 123]
-    assert resolved_scene_2[0][1] is image_b
-    assert resolved_scene_2[1][1] is image_c
-    assert resolved_scene_2[2][1] is image_d
+    assert [index for index, _item in resolved_scene_2] == [22, 102, 123]
+    assert resolved_scene_2[0][1]["image"] is image_b
+    assert resolved_scene_2[1][1]["image"] is image_c
+    assert resolved_scene_2[2][1]["image"] is image_d
 
     reversed_chain = (
         {"image": image_b, "frame_index": -1},
@@ -152,7 +154,7 @@ def main() -> None:
         reversed_chain,
         124,
     )
-    assert [index for index, _image in resolved] == [20, 123]
+    assert [index for index, _item in resolved] == [20, 123]
 
     duplicate_chain = (
         {"image": image_a, "frame_index": 20},
@@ -172,6 +174,97 @@ def main() -> None:
             124,
         ),
     )
+
+
+    class FakeImage:
+        def __getitem__(self, _key: Any) -> Any:
+            return self
+
+    class FakeClip:
+        def __init__(self) -> None:
+            self.images: list[Any] | None = None
+
+        def tokenize(self, prompt: str, images: list[Any] | None = None) -> Any:
+            self.images = list(images or [])
+            return (prompt, self.images)
+
+        def encode_from_tokens_scheduled(self, tokens: Any) -> Any:
+            return [[None, {"tokens": tokens}]]
+
+    class FakeVAE:
+        def encode(self, image: Any) -> Any:
+            return ("latent", image)
+
+    module._empty_av_latent = (
+        lambda width, height, length: ({"samples": object()}, 124)
+    )
+    module._resize_image = (
+        lambda image, width, height, crop: f"resized:{crop}:{id(image)}"
+    )
+
+    captured: dict[str, Any] = {}
+
+    def _conditioning_set_values(conditioning: Any, values: dict[str, Any]) -> Any:
+        captured["keyframes"] = values["minimax_keyframes"]
+        return conditioning
+
+    module.node_helpers.conditioning_set_values = _conditioning_set_values
+
+    verbose_chain = (
+        {"image": FakeImage(), "frame_index": 0, "scene_index": 1, "label": "scene1_start"},
+        {"image": FakeImage(), "frame_index": -1, "scene_index": 1, "label": "scene1_end"},
+        {"image": FakeImage(), "frame_index": -1, "scene_index": 2, "label": "scene2_end"},
+    )
+
+    stream = io.StringIO()
+    with contextlib.redirect_stdout(stream):
+        node = module.MiniMaxH3GuideImagesToVideo()
+        node.execute(
+            clip=FakeClip(),
+            vae=FakeVAE(),
+            prompt="test",
+            width=544,
+            height=960,
+            length=124,
+            state=state_scene_2,
+            verbose=True,
+            guide_images=verbose_chain,
+        )
+
+    verbose_output = stream.getvalue()
+    assert "[MiniMaxH3GuideImages] scene 2: raw_frames=124, delivered_frames=102, prefix_frames=22" in verbose_output
+    assert "mapped guide 'scene1_end' visible 0 -> raw 22" in verbose_output
+    assert "mapped guide 'scene2_end' visible -1 -> raw 123" in verbose_output
+    assert (
+        "inherited start guide 'scene1_end' at raw frame 22 kept as prompt "
+        "image only; temporal keyframe skipped"
+    ) in verbose_output
+    assert "attach 1 minimax_keyframe(s)" in verbose_output
+    assert [
+        int(item["resolved_frame_index"]) for item in captured["keyframes"]
+    ] == [123]
+
+    input_types = module.MiniMaxH3GuideImagesToVideo.INPUT_TYPES()
+    assert "state" not in input_types["required"]
+    assert "state" in input_types["optional"]
+
+    captured.clear()
+    standalone_chain = (
+        {"image": FakeImage(), "frame_index": 0, "scene_index": 7},
+        {"image": FakeImage(), "frame_index": -1, "scene_index": 9},
+    )
+    node.execute(
+        clip=FakeClip(),
+        vae=FakeVAE(),
+        prompt="standalone",
+        width=544,
+        height=960,
+        length=124,
+        guide_images=standalone_chain,
+    )
+    assert [
+        int(item["resolved_frame_index"]) for item in captured["keyframes"]
+    ] == [0, 123]
 
     assert module.NODE_CLASS_MAPPINGS["MiniMaxH3GuideImage"] is (
         module.MiniMaxH3GuideImage
