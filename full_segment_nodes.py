@@ -5,6 +5,9 @@ implementation.  The normal delivered segment, checkpoint, revision metadata,
 audio, and blend artifacts remain owned by ``MiniMaxH3ChainSegmentSave``.
 The subclass only adds a second MP4 containing the decoded current sample
 before Loop Trim removes the repeated leading context frames.
+
+The extra path is opt-in: workflows keep using Chain Segment Save unless this
+node is substituted.
 """
 
 from __future__ import annotations
@@ -50,12 +53,16 @@ def _write_full_segment_video(
 
 
 class MiniMaxH3ChainFullSegmentSave(chain.MiniMaxH3ChainSegmentSave):
-    """Save the normal chain artifacts plus a decoded pre-trim diagnostic MP4."""
+    """Save the normal chain artifacts plus a decoded pre-trim diagnostic MP4.
+
+    Template Method: ``save()`` validates the pre-trim frame count, delegates
+    delivered artifacts to the parent saver, then writes one extra MP4.
+    """
 
     @classmethod
-    def INPUT_TYPES(cls):
-        inputs = super().INPUT_TYPES()
-        required = dict(inputs["required"])
+    def INPUT_TYPES(cls) -> dict[str, Any]:
+        inputs: dict[str, Any] = super().INPUT_TYPES()
+        required: dict[str, Any] = dict(inputs["required"])
         required["images_before_trim"] = (
             "IMAGE",
             {
@@ -73,21 +80,26 @@ class MiniMaxH3ChainFullSegmentSave(chain.MiniMaxH3ChainSegmentSave):
         "artifacts and additionally persist the decoded pre-trim sample under "
         "full_segments for visual seam diagnostics."
     )
+    OUTPUT_TOOLTIPS = (
+        "Persisted scene record for Review Gate and Loop End.",
+        "Saved scene status plus the diagnostic full-segment path.",
+    )
 
     def save(
         self,
-        state,
-        images,
-        sampled_latent,
-        images_before_trim,
-        audio=None,
-        images_with_overlap=None,
-        denoised_latent=None,
-        prompt=None,
-        extra_pnginfo=None,
-        audio_with_overlap=None,
-    ):
-        plan = state["plan"]
+        state: dict[str, Any],
+        images: Any,
+        sampled_latent: Any,
+        images_before_trim: Any,
+        audio: Any = None,
+        images_with_overlap: Any = None,
+        denoised_latent: Any = None,
+        prompt: Any = None,
+        extra_pnginfo: Any = None,
+        audio_with_overlap: Any = None,
+    ) -> dict[str, Any]:
+        """Save delivered artifacts, then the pre-trim diagnostic MP4."""
+        plan: dict[str, Any] = state["plan"]
         index = int(state["index"])
         shot = plan["shots"][index - 1]
         actual_full_frames = int(images_before_trim.shape[0])

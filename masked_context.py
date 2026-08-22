@@ -198,13 +198,22 @@ def _existing_mask_streams(latent, video, audio):
     return video_mask.float(), audio_mask.float()
 
 
+# Must stay identical to guide_nodes.PRESERVED_PREFIX_BOUNDARY_KEY.
+PRESERVED_PREFIX_BOUNDARY_KEY = "_preserved_prefix_boundary"
+
+
 def _drop_prefix_guides(
     conditioning,
     prefix_frames,
     *,
     allow_preserved_boundary=False,
 ):
-    """Remove guides that conflict with a preserved latent prefix."""
+    """Remove guides that conflict with a preserved latent prefix.
+
+    When allow_preserved_boundary is true, a keyframe tagged with
+    PRESERVED_PREFIX_BOUNDARY_KEY may remain if it sits on the last
+    preserved frame. The internal tag is stripped from returned records.
+    """
     out = []
     dropped = []
     boundary_frame = int(prefix_frames) - 1
@@ -216,7 +225,7 @@ def _drop_prefix_guides(
                 "resolved_frame_index", guide.get("frame_index", 0)))
             preserve_boundary = (
                 allow_preserved_boundary
-                and bool(guide.get("_preserved_prefix_boundary"))
+                and bool(guide.get(PRESERVED_PREFIX_BOUNDARY_KEY))
                 and position == boundary_frame
             )
             if 0 <= position < int(prefix_frames) and not preserve_boundary:
@@ -224,9 +233,9 @@ def _drop_prefix_guides(
                 continue
 
             cleaned_guide = guide
-            if "_preserved_prefix_boundary" in guide:
+            if PRESERVED_PREFIX_BOUNDARY_KEY in guide:
                 cleaned_guide = guide.copy()
-                cleaned_guide.pop("_preserved_prefix_boundary", None)
+                cleaned_guide.pop(PRESERVED_PREFIX_BOUNDARY_KEY, None)
             kept.append(cleaned_guide)
         if "minimax_keyframes" in metadata:
             metadata["minimax_keyframes"] = kept

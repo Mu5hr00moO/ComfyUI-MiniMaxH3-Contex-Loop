@@ -1,4 +1,16 @@
-"""MiniMax H3 guide-image nodes with arbitrary timeline anchors."""
+"""MiniMax H3 guide-image nodes with arbitrary timeline anchors.
+
+Standalone use resolves frame_index on the generated clip timeline.
+When H3 Chain state is connected, guides become scene-local:
+
+- every guide must set scene_index
+- scene 1 requires an explicit visible frame 0
+- scene N inherits scene N-1 frame -1 as its visible start (frame 0)
+- every non-final scene requires a visible frame -1
+- visible indices map onto the raw H3 timeline after the preserved prefix
+- latent_guide keeps that inherited start as a keyframe on the last
+  preserved raw frame so prefix-mask cleanup does not drop it
+"""
 
 from __future__ import annotations
 
@@ -18,6 +30,8 @@ AUDIO_LATENT_FPS: Final[int] = 40
 GUIDE_IMAGES_TYPE: Final[str] = "MINIMAX_H3_GUIDE_IMAGES"
 STATE_TYPE: Final[str] = "H3_CHAIN_STATE"
 LOG_PREFIX: Final[str] = "[MiniMaxH3GuideImages]"
+# Must stay identical to masked_context.PRESERVED_PREFIX_BOUNDARY_KEY.
+PRESERVED_PREFIX_BOUNDARY_KEY: Final[str] = "_preserved_prefix_boundary"
 
 
 class GuideImageSpec(TypedDict):
@@ -117,6 +131,44 @@ def _guide_label(item: GuideImageSpec) -> str:
     return f"scene {int(scene_index)} frame {frame_index}"
 
 
+def _inherited_start_keyframe(
+    item: GuideImageSpec,
+    resized: torch.Tensor,
+    resolved_index: int,
+    visible_start_raw_index: int,
+    continuation_mode: str,
+    scene_index: int,
+    verbose: bool,
+) -> dict[str, Any] | None:
+    """Decide whether an inherited scene-start guide also becomes a keyframe.
+
+    The image is always kept in the prompt. A temporal keyframe is attached
+    only in latent_guide when the preserved prefix is non-empty; it is then
+    anchored to the last preserved raw frame.
+    """
+    if continuation_mode == "latent_guide" and visible_start_raw_index > 0:
+        boundary_index: int = visible_start_raw_index - 1
+        _log(
+            verbose,
+            f"scene {scene_index}: inherited start guide '{_guide_label(item)}' "
+            f"kept as prompt image and anchored to preserved boundary "
+            f"raw frame {boundary_index}",
+        )
+        return {
+            "resolved_frame_index": boundary_index,
+            "image": resized,
+            PRESERVED_PREFIX_BOUNDARY_KEY: True,
+        }
+
+    _log(
+        verbose,
+        f"scene {scene_index}: inherited start guide '{_guide_label(item)}' "
+        f"at raw frame {resolved_index} kept as prompt image only; "
+        "temporal keyframe skipped",
+    )
+    return None
+
+
 class MiniMaxH3GuideImage:
     """Append one image anchor to a chain of MiniMax H3 guide images."""
 
@@ -139,7 +191,9 @@ class MiniMaxH3GuideImage:
                         "step": 1,
                         "tooltip": (
                             "Pixel-frame index for this guide image. Negative "
-                            "values count from the end; -1 is the last frame."
+                            "values count from the end; -1 is the last frame. "
+                            "With H3 Chain state connected, the index is on "
+                            "the scene's visible delivered timeline."
                         ),
                     },
                 ),
@@ -152,7 +206,11 @@ class MiniMaxH3GuideImage:
                         "min": 1,
                         "max": 9999,
                         "step": 1,
-                        "tooltip": "One-based scene number for this guide image.",
+                        "tooltip": (
+                            "One-based scene number. Required when Guide "
+                            "Images to Video receives H3 Chain state. Scene N "
+                            "inherits scene N-1 frame -1 as visible frame 0."
+                        ),
                     },
                 ),
                 "label": (
@@ -183,7 +241,10 @@ class MiniMaxH3GuideImage:
     CATEGORY: str = "model/conditioning/minimax"
     DESCRIPTION: str = (
         "Add one MiniMax H3 guide image at a chosen frame index. Chain several "
-        "nodes through guide_images."
+        "nodes through guide_images. With H3 Chain state, set scene_index: "
+        "scene 1 needs visible frame 0, later scenes inherit the previous "
+        "scene's frame -1 as their start, and every non-final scene needs "
+        "frame -1."
     )
 
     def build(
@@ -272,7 +333,10 @@ class MiniMaxH3GuideImagesToVideo:
                     "BOOLEAN",
                     {
                         "default": False,
-                        "tooltip": "Log guide selection, visible-to-raw mapping, and keyframe attachment details.",
+                        "tooltip": (
+                            "Log guide selection, visible-to-raw mapping, "
+                            "inherited-start policy, and keyframe attachment."
+                        ),
                     },
                 ),
             },
@@ -281,8 +345,11 @@ class MiniMaxH3GuideImagesToVideo:
                     STATE_TYPE,
                     {
                         "tooltip": (
-                            "Optional H3 chain state. When omitted, guide images "
-                            "are resolved directly on the generated clip timeline."
+                            "Optional H3 chain state. When present, guides are "
+                            "filtered by scene_index and mapped from the "
+                            "visible delivered timeline onto the raw H3 clip. "
+                            "When omitted, frame indices apply directly to the "
+                            "generated clip."
                         ),
                     },
                 ),
@@ -306,8 +373,11 @@ class MiniMaxH3GuideImagesToVideo:
     FUNCTION: str = "execute"
     CATEGORY: str = "model/conditioning/minimax"
     DESCRIPTION: str = (
-        "MiniMax H3 image-to-video conditioning with any number of guide images "
-        "anchored at arbitrary frame indices."
+        "MiniMax H3 image-to-video conditioning with any number of guide "
+        "images. Standalone mode anchors images on the generated clip. With "
+        "H3 Chain state, scene-local guides are mapped onto the raw timeline; "
+        "latent_guide mode keeps the inherited start on the preserved prefix "
+        "boundary."
     )
 
     def execute(
@@ -409,28 +479,17 @@ class MiniMaxH3GuideImagesToVideo:
                 and resolved_index == visible_start_raw_index
             )
             if inherited_start:
-                if continuation_mode == "latent_guide" and visible_start_raw_index > 0:
-                    boundary_index: int = visible_start_raw_index - 1
-                    _log(
-                        verbose,
-                        f"scene {scene_index}: inherited start guide '{_guide_label(item)}' "
-                        f"kept as prompt image and anchored to preserved boundary "
-                        f"raw frame {boundary_index}",
-                    )
-                    keyframes.append(
-                        {
-                            "resolved_frame_index": boundary_index,
-                            "image": resized,
-                            "_preserved_prefix_boundary": True,
-                        }
-                    )
-                else:
-                    _log(
-                        verbose,
-                        f"scene {scene_index}: inherited start guide '{_guide_label(item)}' "
-                        f"at raw frame {resolved_index} kept as prompt image only; "
-                        "temporal keyframe skipped",
-                    )
+                keyframe = _inherited_start_keyframe(
+                    item,
+                    resized,
+                    resolved_index,
+                    visible_start_raw_index,
+                    continuation_mode,
+                    scene_index,
+                    verbose,
+                )
+                if keyframe is not None:
+                    keyframes.append(keyframe)
                 continue
 
             _log(

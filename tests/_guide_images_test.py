@@ -147,6 +147,50 @@ def main() -> None:
     assert resolved_scene_2[1][1]["image"] is image_c
     assert resolved_scene_2[2][1]["image"] is image_d
 
+    state_scene_1 = {
+        "index": 1,
+        "plan": state_scene_2["plan"],
+    }
+    scene_1_guides = module.MiniMaxH3GuideImagesToVideo._select_scene_guides(
+        scene_chain,
+        state_scene_1,
+    )
+    assert [int(item["frame_index"]) for item in scene_1_guides] == [0, -1]
+    assert scene_1_guides[0]["image"] is image_a
+
+    _assert_raises(
+        ValueError,
+        lambda: module.MiniMaxH3GuideImagesToVideo._select_scene_guides(
+            (
+                {"image": image_b, "frame_index": -1, "scene_index": 1},
+                {"image": image_d, "frame_index": -1, "scene_index": 2},
+            ),
+            state_scene_1,
+        ),
+    )
+    _assert_raises(
+        ValueError,
+        lambda: module.MiniMaxH3GuideImagesToVideo._select_scene_guides(
+            (
+                {"image": image_a, "frame_index": 0, "scene_index": 1},
+                {"image": image_c, "frame_index": 80, "scene_index": 2},
+            ),
+            state_scene_2,
+        ),
+    )
+    _assert_raises(
+        ValueError,
+        lambda: module.MiniMaxH3GuideImagesToVideo._select_scene_guides(
+            (
+                {"image": image_a, "frame_index": 0, "scene_index": 1},
+                {"image": image_b, "frame_index": -1, "scene_index": 1},
+                {"image": image_c, "frame_index": 0, "scene_index": 2},
+                {"image": image_d, "frame_index": -1, "scene_index": 2},
+            ),
+            state_scene_2,
+        ),
+    )
+
     reversed_chain = (
         {"image": image_b, "frame_index": -1},
         {"image": image_a, "frame_index": 20},
@@ -276,8 +320,8 @@ def main() -> None:
     )
 
     print(
-        "guide images: frame-grid alignment, chaining, negative indices, "
-        "temporal sorting, duplicate rejection, and node mappings pass"
+        "guide images: frame-grid alignment, chaining, scene-local selection, "
+        "visible-to-raw mapping, and node mappings pass"
     )
 
 
