@@ -96,6 +96,7 @@ def main() -> None:
     state_scene_2 = {
         "index": 2,
         "plan": {
+            "compatibility": {"continuation_mode": "latent_guide"},
             "shots": [
                 {
                     "raw_frames": 124,
@@ -236,13 +237,14 @@ def main() -> None:
     assert "mapped guide 'scene1_end' visible 0 -> raw 22" in verbose_output
     assert "mapped guide 'scene2_end' visible -1 -> raw 123" in verbose_output
     assert (
-        "inherited start guide 'scene1_end' at raw frame 22 kept as prompt "
-        "image only; temporal keyframe skipped"
+        "inherited start guide 'scene1_end' kept as prompt image and anchored "
+        "to preserved boundary raw frame 21"
     ) in verbose_output
-    assert "attach 1 minimax_keyframe(s)" in verbose_output
+    assert "attach 2 minimax_keyframe(s)" in verbose_output
     assert [
         int(item["resolved_frame_index"]) for item in captured["keyframes"]
-    ] == [123]
+    ] == [21, 123]
+    assert captured["keyframes"][0]["_preserved_prefix_boundary"] is True
 
     input_types = module.MiniMaxH3GuideImagesToVideo.INPUT_TYPES()
     assert "state" not in input_types["required"]

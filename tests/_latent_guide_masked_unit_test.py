@@ -142,6 +142,16 @@ def main() -> None:
         "minimax_refs": refs,
         "minimax_keyframes": [
             {"resolved_frame_index": 0, "name": "conflicting first"},
+            {
+                "resolved_frame_index": 37,
+                "name": "wrong preserved boundary",
+                "_preserved_prefix_boundary": True,
+            },
+            {
+                "resolved_frame_index": 38,
+                "name": "retained preserved boundary",
+                "_preserved_prefix_boundary": True,
+            },
             {"resolved_frame_index": 191, "name": "retained last"},
         ],
     }]]
@@ -184,8 +194,13 @@ def main() -> None:
     metadata = out_conditioning[0][1]
     assert metadata["minimax_refs"] is refs
     assert [item["name"] for item in metadata["minimax_keyframes"]] == [
-        "retained last"
+        "retained preserved boundary",
+        "retained last",
     ]
+    assert all(
+        "_preserved_prefix_boundary" not in item
+        for item in metadata["minimax_keyframes"]
+    )
     assert torch.all(target_video == -1.0)
     assert torch.all(target_audio == -2.0)
 

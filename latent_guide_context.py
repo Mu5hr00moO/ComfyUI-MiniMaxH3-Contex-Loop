@@ -127,7 +127,11 @@ def apply_latent_guide_prefix(
     out_latent["noise_mask"] = comfy.nested_tensor.NestedTensor(
         (video_mask, audio_mask)
     )
-    out_conditioning: Any = _drop_prefix_guides(conditioning, frames)
+    out_conditioning: Any = _drop_prefix_guides(
+        conditioning,
+        frames,
+        allow_preserved_boundary=True,
+    )
 
     if abs(float(overhang)) > 1e-9:
         _LOG.warning(

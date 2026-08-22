@@ -198,20 +198,36 @@ def _existing_mask_streams(latent, video, audio):
     return video_mask.float(), audio_mask.float()
 
 
-def _drop_prefix_guides(conditioning, prefix_frames):
-    """Remove target guides that conflict with the preserved latent prefix."""
+def _drop_prefix_guides(
+    conditioning,
+    prefix_frames,
+    *,
+    allow_preserved_boundary=False,
+):
+    """Remove guides that conflict with a preserved latent prefix."""
     out = []
     dropped = []
+    boundary_frame = int(prefix_frames) - 1
     for embedding, extra in conditioning:
         metadata = extra.copy()
         kept = []
         for guide in metadata.get("minimax_keyframes") or []:
             position = float(guide.get(
                 "resolved_frame_index", guide.get("frame_index", 0)))
-            if 0 <= position < int(prefix_frames):
+            preserve_boundary = (
+                allow_preserved_boundary
+                and bool(guide.get("_preserved_prefix_boundary"))
+                and position == boundary_frame
+            )
+            if 0 <= position < int(prefix_frames) and not preserve_boundary:
                 dropped.append(position)
-            else:
-                kept.append(guide)
+                continue
+
+            cleaned_guide = guide
+            if "_preserved_prefix_boundary" in guide:
+                cleaned_guide = guide.copy()
+                cleaned_guide.pop("_preserved_prefix_boundary", None)
+            kept.append(cleaned_guide)
         if "minimax_keyframes" in metadata:
             metadata["minimax_keyframes"] = kept
         out.append([embedding, metadata])

@@ -354,6 +354,14 @@ class MiniMaxH3GuideImagesToVideo:
                 frame_count,
             )
             shot: dict[str, Any] = state["plan"]["shots"][scene_index - 1]
+            continuation_mode: str = str(
+                shot.get(
+                    "continuation_mode",
+                    state["plan"].get("compatibility", {}).get(
+                        "continuation_mode", "guide"
+                    ),
+                )
+            )
             raw_frames: int = int(shot["raw_frames"])
             delivered_frames: int = int(shot["delivered_frames"])
             prefix_frames: int = raw_frames - delivered_frames
@@ -401,12 +409,28 @@ class MiniMaxH3GuideImagesToVideo:
                 and resolved_index == visible_start_raw_index
             )
             if inherited_start:
-                _log(
-                    verbose,
-                    f"scene {scene_index}: inherited start guide '{_guide_label(item)}' "
-                    f"at raw frame {resolved_index} kept as prompt image only; "
-                    "temporal keyframe skipped",
-                )
+                if continuation_mode == "latent_guide" and visible_start_raw_index > 0:
+                    boundary_index: int = visible_start_raw_index - 1
+                    _log(
+                        verbose,
+                        f"scene {scene_index}: inherited start guide '{_guide_label(item)}' "
+                        f"kept as prompt image and anchored to preserved boundary "
+                        f"raw frame {boundary_index}",
+                    )
+                    keyframes.append(
+                        {
+                            "resolved_frame_index": boundary_index,
+                            "image": resized,
+                            "_preserved_prefix_boundary": True,
+                        }
+                    )
+                else:
+                    _log(
+                        verbose,
+                        f"scene {scene_index}: inherited start guide '{_guide_label(item)}' "
+                        f"at raw frame {resolved_index} kept as prompt image only; "
+                        "temporal keyframe skipped",
+                    )
                 continue
 
             _log(
