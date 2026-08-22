@@ -288,7 +288,7 @@ def main() -> None:
     assert [
         int(item["resolved_frame_index"]) for item in captured["keyframes"]
     ] == [21, 123]
-    assert captured["keyframes"][0]["_preserved_prefix_boundary"] is True
+    assert captured["keyframes"][0][module.PRESERVED_PREFIX_BOUNDARY_KEY] is True
 
     input_types = module.MiniMaxH3GuideImagesToVideo.INPUT_TYPES()
     assert "state" not in input_types["required"]

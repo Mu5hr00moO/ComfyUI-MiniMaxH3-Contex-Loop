@@ -4712,6 +4712,54 @@ class MiniMaxH3PatchPriority:
         return (conditioning, status)
 
 
+def _apply_latent_guide_continuation(
+    state,
+    conditioning,
+    vae,
+    latent,
+    audio_vae,
+    cfg,
+    context_length,
+    external_first,
+):
+    """Apply raw sampled prefix, or scene-1 decoded-frame VAE fallback."""
+    previous_latent = state.get("previous_latent")
+    if previous_latent is not None:
+        from .latent_guide_context import apply_latent_guide_prefix
+        out_conditioning, out_latent, trim = apply_latent_guide_prefix(
+            conditioning=conditioning,
+            latent=latent,
+            previous_latent=previous_latent,
+            context_length=context_length,
+        )
+        return (out_conditioning, trim, True, out_latent)
+    if not external_first:
+        raise ValueError(
+            "H3 latent guide continuation has no previous sampled AV "
+            "latent.")
+    previous_frames = state.get("previous_frames")
+    if previous_frames is None:
+        raise ValueError(
+            "H3 latent guide external continuation has no previous "
+            "frame checkpoint.")
+    _LOG.info(
+        "H3 latent guide scene 1 has imported context but no native "
+        "sampled latent; using the masked decoded-frame VAE fallback.")
+    from .masked_context import apply_masked_prefix
+    out_conditioning, out_latent, trim = apply_masked_prefix(
+        conditioning=conditioning,
+        vae=vae,
+        latent=latent,
+        previous_frames=previous_frames,
+        context_length=context_length,
+        crop=cfg["crop"],
+        previous_latent=None,
+        audio_vae=audio_vae,
+        previous_audio=state.get("previous_audio"),
+    )
+    return (out_conditioning, trim, True, out_latent)
+
+
 class MiniMaxH3ChainContext:
     @classmethod
     def INPUT_TYPES(cls):
@@ -4818,41 +4866,16 @@ class MiniMaxH3ChainContext:
                 latent,
             )
         if continuation_mode == "latent_guide":
-            previous_latent: Any = state.get("previous_latent")
-            if previous_latent is not None:
-                from .latent_guide_context import apply_latent_guide_prefix
-                out_conditioning, out_latent, trim = apply_latent_guide_prefix(
-                    conditioning=conditioning,
-                    latent=latent,
-                    previous_latent=previous_latent,
-                    context_length=context_length,
-                )
-                return (out_conditioning, trim, True, out_latent)
-            if not external_first:
-                raise ValueError(
-                    "H3 latent guide continuation has no previous sampled AV "
-                    "latent.")
-            previous_frames = state.get("previous_frames")
-            if previous_frames is None:
-                raise ValueError(
-                    "H3 latent guide external continuation has no previous "
-                    "frame checkpoint.")
-            _LOG.info(
-                "H3 latent guide scene 1 has imported context but no native "
-                "sampled latent; using the masked decoded-frame VAE fallback.")
-            from .masked_context import apply_masked_prefix
-            out_conditioning, out_latent, trim = apply_masked_prefix(
-                conditioning=conditioning,
-                vae=vae,
-                latent=latent,
-                previous_frames=previous_frames,
-                context_length=context_length,
-                crop=cfg["crop"],
-                previous_latent=None,
-                audio_vae=audio_vae,
-                previous_audio=state.get("previous_audio"),
+            return _apply_latent_guide_continuation(
+                state,
+                conditioning,
+                vae,
+                latent,
+                audio_vae,
+                cfg,
+                context_length,
+                external_first,
             )
-            return (out_conditioning, trim, True, out_latent)
         previous_frames = state.get("previous_frames")
         if previous_frames is None:
             raise ValueError("H3 chain continuation has no previous frame checkpoint.")

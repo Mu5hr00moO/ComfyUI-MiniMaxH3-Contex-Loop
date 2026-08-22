@@ -109,8 +109,9 @@ def main() -> None:
     sys.modules[patch_payload.__name__] = patch_payload
 
     nodes = _load("nodes")
-    _load("masked_context")
+    masked_context = _load("masked_context")
     custom = _load("latent_guide_context")
+    boundary_key: str = masked_context.PRESERVED_PREFIX_BOUNDARY_KEY
     custom._require_latent_guide_mask_support = lambda: None
 
     target_frames: int = 192
@@ -145,12 +146,12 @@ def main() -> None:
             {
                 "resolved_frame_index": 37,
                 "name": "wrong preserved boundary",
-                "_preserved_prefix_boundary": True,
+                boundary_key: True,
             },
             {
                 "resolved_frame_index": 38,
                 "name": "retained preserved boundary",
-                "_preserved_prefix_boundary": True,
+                boundary_key: True,
             },
             {"resolved_frame_index": 191, "name": "retained last"},
         ],
@@ -198,9 +199,30 @@ def main() -> None:
         "retained last",
     ]
     assert all(
-        "_preserved_prefix_boundary" not in item
+        boundary_key not in item
         for item in metadata["minimax_keyframes"]
     )
+
+    dropped_default = masked_context._drop_prefix_guides(
+        [[
+            "embedding",
+            {
+                "minimax_keyframes": [
+                    {
+                        "resolved_frame_index": 38,
+                        "name": "tagged boundary",
+                        boundary_key: True,
+                    },
+                    {"resolved_frame_index": 191, "name": "retained last"},
+                ],
+            },
+        ]],
+        39,
+        allow_preserved_boundary=False,
+    )
+    assert [
+        item["name"] for item in dropped_default[0][1]["minimax_keyframes"]
+    ] == ["retained last"]
     assert torch.all(target_video == -1.0)
     assert torch.all(target_audio == -2.0)
 

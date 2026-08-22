@@ -238,7 +238,7 @@ def _video_tail_from_latent(
     requested_frames: int = int(frame_count)
     if requested_frames < 1:
         raise ValueError(
-            "h3_motion_context: raw latent context must contain at least "
+            "h3_raw_latent_tail: raw latent context must contain at least "
             "one frame."
         )
 
@@ -247,7 +247,7 @@ def _video_tail_from_latent(
     total_frames: int = _pixel_frames(total_steps)
     if requested_frames > total_frames:
         raise ValueError(
-            f"h3_motion_context: raw latent contains {total_frames} frames; "
+            f"h3_raw_latent_tail: raw latent contains {total_frames} frames; "
             f"cannot extract {requested_frames} context frames."
         )
 
@@ -259,7 +259,7 @@ def _video_tail_from_latent(
 
     if covered_frames != requested_frames:
         raise ValueError(
-            f"h3_motion_context: {requested_frames} context frames do not "
+            f"h3_raw_latent_tail: {requested_frames} context frames do not "
             "form a native H3 temporal run."
         )
 
@@ -267,7 +267,7 @@ def _video_tail_from_latent(
     phase: int = start_step % len(FRAME_PER_TOKEN)
     if phase != 0:
         raise ValueError(
-            f"h3_motion_context: {requested_frames}-frame raw latent tail "
+            f"h3_raw_latent_tail: {requested_frames}-frame raw latent tail "
             f"starts at temporal phase {phase} instead of phase 0."
         )
 
