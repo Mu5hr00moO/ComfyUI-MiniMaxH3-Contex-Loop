@@ -68,6 +68,36 @@ coordinates.
 Place official **MiniMax H3 Add Guide** nodes after Loop Context for additional
 scene-local image, video, or audio anchors.
 
+## Scene-local Guide Image anchors
+
+Use **MiniMax H3 Guide Image** when image anchors must be authored against the
+scene plan rather than a single generated clip. Chain as many Guide Image nodes
+as needed into **MiniMax H3 Guide Images to Video**.
+
+For chain use, wire Current Shot's `prompt`, RAW `length`, `width`, `height`, and
+`state` into Guide Images to Video, together with the same H3 `clip` and video
+`vae` used for conditioning. The `length` input must be Current Shot's RAW frame
+count: scene-aware execution rejects a generated frame count that does not match
+the current shot's `raw_frames`. Feed Guide Images to Video's `positive` and
+`latent` outputs into Chain Context's `conditioning` and `latent` inputs, then
+use Chain Context's outputs for the sampler path.
+
+Scene-aware rules are strict:
+
+- every guide sets a one-based `scene_index`;
+- scene 1 has an explicit visible frame `0`;
+- every non-final scene has a visible frame `-1`;
+- scene N inherits scene N−1 frame `-1` as its visible frame `0`, so later
+  scenes must not define another explicit frame `0`;
+- non-negative indices and `-1` are interpreted on the **visible delivered
+  timeline**, then shifted behind that scene's raw continuation prefix.
+
+The node rejects duplicate scene/frame targets and out-of-range visible indices.
+In standalone use without Chain state, indices address the generated clip
+directly and negative values count from its end. In `latent_guide`, an inherited
+start image remains a prompt image and is also anchored at the last preserved
+raw-prefix frame so prefix cleanup does not discard that boundary condition.
+
 ## Re-film a synchronized performance
 
 The [three-angle guitar workflow](<../example_workflows/EXPERIMENTAL MiniMax H3 Three-Angle Guitar Ref2VA.json>)
@@ -85,3 +115,24 @@ Loop Trim's `retain_overlap_frames` output exposes part of the repeated visual
 context while leaving its normal images and audio fully trimmed. Use it when an
 external optical-flow or learned stitcher benefits from overlap. Keep it at `0`
 for the standard hard-boundary chain.
+
+## Full-segment seam diagnostics
+
+**MiniMax H3 Contex Loop Full Segment Save** is an opt-in replacement for the
+normal Segment + Checkpoint saver when you need to inspect what H3 decoded on
+both sides of Loop Trim. Wire its ordinary `images` input from the normal
+post-Trim output and wire `images_before_trim` directly from the current VAE
+Decode output before Loop Trim. The pre-Trim batch must contain exactly the
+scene's planned `raw_frames`.
+
+The node calls the standard saver for delivered video, checkpoints, revisions,
+audio, blend artifacts, and the segment record consumed by Review Gate and Loop
+End. It then writes one additional revision-versioned MP4 under:
+
+```text
+output/h3_chains/<run_name>/full_segments/
+```
+
+That MP4 includes the repeated leading context when one is present and is for
+visual seam diagnosis only. Normal final/partial assembly continues to use the
+delivered segment.

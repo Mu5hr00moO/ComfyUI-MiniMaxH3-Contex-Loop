@@ -222,6 +222,7 @@ output/h3_chains/<run_name>/
 ├── checkpoints/clip_0001.<revision>.json
 ├── checkpoints/clip_0001.<revision>.safetensors
 ├── generated_audio/
+├── full_segments/                     # optional Full Segment diagnostics
 ├── upscaled/<profile>/
 └── final/<filename>.mp4
 ```
@@ -234,6 +235,19 @@ Workflow and API graph metadata are embedded in segment/final files using
 ComfyUI's standard tags. `workflow.json` is the preferred file to drag back
 into ComfyUI; `plan.json` remains the authoritative effective render record.
 Keep run folders private when workflows contain credentials.
+
+### Optional Full Segment diagnostics
+
+When **MiniMax H3 Contex Loop Full Segment Save** replaces the normal segment
+saver, each scene also gets a revision-versioned pre-Trim MP4 under
+`full_segments/`. Its `images_before_trim` input must come directly from the
+current VAE Decode before Loop Trim and must contain exactly `raw_frames`.
+
+This is additive diagnostics: the standard delivered MP4, checkpoint, revision
+metadata, audio/blend artifacts, and segment record remain unchanged and are
+still the files used by Review Gate, resume, and assembly. The full-segment MP4
+exists only to inspect the repeated prefix when one is present and the visual
+join.
 
 ## Assembly
 

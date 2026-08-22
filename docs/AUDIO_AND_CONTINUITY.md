@@ -13,21 +13,30 @@ exact, use `source_track`. For a short voice/timbre reference where H3 should
 generate new words, use `generated_audio` and schedule that short clip as an
 ordinary audio reference.
 
-These descriptions are for the default `guide` continuation mode. In
-experimental `masked_av`, Chain Context always preserves a matching video and
-audio prefix inside the target latent, including when final assembly uses
-`source_track`. For recursive scenes it copies the previous sampler's audio
-latent directly. For scene 1 after Existing Video Context, source audio and the
-H3 audio VAE must both be connected.
+Continuation mode changes how the incoming AV history is carried:
 
-Prefer a 39-frame masked prefix. It maps exactly to 65 audio steps; 22 frames
+- `guide` uses decoded/re-encoded visual guides and may carry generated audio
+  with its own `audio_context_length`;
+- `latent_guide` copies the previous sampler's raw H3 video/audio latent tail
+  directly into the next target and preserves both streams with denoise masks;
+- experimental `masked_av` VAE-encodes the preceding decoded video tail into a
+  preserved target prefix and pairs it with the matching previous sampled-audio
+  tail.
+
+`latent_guide` and `masked_av` always preserve one matching video/audio prefix
+interval, including when final assembly uses `source_track`. They require at
+least 5 context frames, `encode_mode=video`, and `anchor_mode=head`. For scene 1
+after Existing Video Context, neither latent mode has a sampled predecessor AV
+latent, so the masked decoded-frame fallback encodes both the imported video
+tail and matching context audio. With active latent-mode context, Existing
+Video Context must therefore provide context audio and Chain Context must
+receive the H3 audio VAE; otherwise execution fails before sampling.
+
+Prefer a 39-frame masked-AV prefix. It maps exactly to 65 audio steps; 22 frames
 maps to 36.666... steps and therefore requires rounding at the AV boundary.
-
-The Plan node mode is an inherited default and each scene may override it. The
-override controls the transition into that scene: `guide` for a new shot with
-interpretive continuity, `masked_av` for exact same-shot continuation. Mixed
-plans must still use global context/encode/anchor settings compatible with
-every masked scene.
+The Plan node mode is an inherited default and each scene may override the
+transition into that scene. Mixed plans must use global context/encode/anchor
+settings compatible with every latent-mode scene.
 
 ## Source-track wiring
 
@@ -123,10 +132,11 @@ the decoded audio tail to the exact delivered-frame duration.
 the repeated context for external stitchers. It does not alter the normal clean
 images output or audio.
 
-Both continuation modes return the prefix length as `trim_frames`. In masked
-mode those leading frames are decoded from preserved target-latent rows rather
-than regenerated guide-conditioned rows, but they still overlap the preceding
-scene and must be removed from delivered duration.
+All three continuation modes return the repeated visual prefix length as
+`trim_frames`. In `guide`, those frames are regenerated from guide conditioning.
+In `latent_guide` and `masked_av`, they decode from preserved target-latent rows.
+Either way the prefix overlaps the preceding scene and must be removed from
+delivered duration.
 
 ## Measure a join
 

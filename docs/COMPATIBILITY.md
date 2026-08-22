@@ -6,19 +6,23 @@ Installing the pack does not globally alter ordinary ComfyUI workflows. Its H3
 conditioning patches activate when a Contex Loop Context node executes and
 self-check the live model/layout assumptions before use.
 
-The two continuation engines are capability-gated independently:
+The three continuation engines are capability-gated by the behavior they use:
 
 - `guide` prefers native Add Guide / MultiRef behavior from ComfyUI PR #15439
   and uses the existing guarded guide fallback only on older builds;
-- `masked_av` prefers native per-token H3 AV masks from PR #15375 and lazily
-  installs only missing mask-engine, payload, token-grid helpers,
-  inpaint-scale, and legacy sampler-bridge behavior when the masked path
-  executes. The merged helper API remains authoritative and is not wrapped.
-  Masked mode still requires the native #15439 Add Guide / MultiRef core
-  baseline and is not enabled on the older guide-fallback architecture.
+- `latent_guide` uses per-stream H3 AV masks from PR #15375 to freeze a prefix
+  copied directly from the previous sampled AV latent. Its continuation prefix
+  does not require the native Add Guide API. Missing recognized mask helpers are
+  enabled lazily when this mode executes;
+- `masked_av` uses the same native per-token H3 AV-mask family but VAE-encodes
+  decoded predecessor video into the target prefix. It lazily installs only
+  missing mask-engine, payload, token-grid, inpaint-scale, and legacy
+  sampler-bridge behavior. The merged helper API remains authoritative and is
+  not wrapped. Masked AV still requires the native #15439 Add Guide / MultiRef
+  core baseline and is not enabled on the older guide-fallback architecture.
 
 Importing the node pack or running a guide-only workflow does not activate the
-masked runtime compatibility. Recognized pre-merge compatibility wrappers are
+AV-mask runtime compatibility. Recognized pre-merge compatibility wrappers are
 upgraded to the final merged contract; unknown partial mask engines are
 rejected rather than mixed with the vendored snapshot.
 

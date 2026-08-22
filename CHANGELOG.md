@@ -2,7 +2,25 @@
 
 Newest first. This file keeps release history out of the onboarding README.
 
-## Unreleased — Deferred checkpoint upscaling
+## Unreleased
+
+### Scene-guide continuation and diagnostics
+
+- Added `latent_guide` continuation. Generated scene-to-scene transitions copy
+  the previous sampler's raw H3 video/audio latent tail directly into the next
+  target and preserve that prefix with per-stream AV denoise masks, avoiding a
+  video VAE round trip. Imported scene 1 uses the masked decoded-frame VAE
+  fallback because no sampled predecessor latent exists yet.
+- Added **MiniMax H3 Guide Image** and **MiniMax H3 Guide Images to Video** for
+  arbitrary image anchors. With Chain state, guides use scene-local delivered
+  frame indices, scene N inherits scene N−1 frame `-1` as its start, and
+  `latent_guide` keeps that inherited start on the preserved-prefix boundary.
+- Added opt-in **MiniMax H3 Contex Loop Full Segment Save**. It keeps the normal
+  delivered segment/checkpoint/revision/audio path unchanged and additionally
+  saves the decoded pre-Trim sample under `full_segments/` for visual seam
+  diagnosis.
+
+### Deferred checkpoint upscaling
 
 - Added a backend-neutral recursive upscale child run: Checkpoint Manager Plan
   passthrough → Upscale Adapter → Current Scene → H3/LTX/custom backend →

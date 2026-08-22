@@ -20,7 +20,8 @@ giant cumulative image tensor.
 |---|---|
 | 🎬 | Visual multiline scene planner with exact H3 timing |
 | 🔁 | One recursive sampling body for a complete scene plan |
-| 🧬 | Motion and optional generated-audio continuity |
+| 🧬 | Three continuation engines: guide, raw sampled-latent guide, and masked AV |
+| 📌 | Scene-local Guide Image anchors on the visible delivered timeline |
 | 🏷️ | Prompt-driven picture, video, and audio references with stable `@tags` |
 | 🗓️ | Optional legacy scene-range scheduling for explicit reference control |
 | 👀 | Video-with-sound review, prompt retry, and seed reroll |
@@ -29,13 +30,15 @@ giant cumulative image tensor.
 | 🧭 | Optional Plan Studio and Rich Scene Prompt Editor |
 | ⏩ | Existing-video continuation and optional source prepend |
 | 🖼️ | Lossless PNG re-decode from saved scene latents |
-| 🔬 | In-graph audio-seam diagnostics |
+| 🔬 | In-graph audio-seam diagnostics and optional pre-trim Full Segment MP4s |
 
 In the default `guide` mode, updated ComfyUI core owns guide placement and
-reference-payload merging; this pack does not patch H3. The experimental
-`masked_av` mode additionally needs per-stream H3 video/audio noise masks from
-merged PR #15375. Current ComfyUI owns that path natively; older builds lazily
-receive the vendored runtime compatibility only when that mode executes.
+reference-payload merging. `latent_guide` and the experimental `masked_av` mode
+use per-stream H3 video/audio noise masks from merged PR #15375. `latent_guide`
+copies the previous sampler's raw AV tail directly into the next target latent;
+`masked_av` VAE-encodes the preceding decoded video tail instead. Current
+ComfyUI owns the mask path natively; older builds lazily receive the vendored
+runtime compatibility only when one of those modes executes.
 
 ## Install
 
@@ -118,8 +121,8 @@ instead of overwriting an MP4 with the same requested name.
 | Setting | Good starting point | Meaning |
 |---|---:|---|
 | `width × height` | `960 × 544` | Multiples of 32 |
-| `continuation_mode` | `guide` | Default for scenes without an override; `guide` suits a new shot and `masked_av` an exact same-shot continuation |
-| `context_length` | `22` guide / `39` masked | Repeated motion history carried into continuations |
+| `continuation_mode` | `guide` | Default for scenes without an override; choose `guide`, `latent_guide`, or `masked_av` per transition |
+| `context_length` | `22` guide/latent / `39` masked | Repeated history carried into continuations; latent modes require at least 5 frames |
 | `encode_mode` | `video` | Preserves motion in the VAE latent |
 | `anchor_mode` | `head` | Regenerates then trims the repeated opening context |
 | `crop` | `disabled` | Best when source and target framing already agree |
@@ -131,17 +134,26 @@ Use `generation_fingerprint` to record model, VAE, LoRA, references, CFG,
 sampler, and scheduler choices that live outside the Plan. Change it when those
 dependencies change so incompatible checkpoints cannot be resumed silently.
 
-### Guide versus masked AV continuation
+### Guide, latent guide, and masked AV continuation
 
 `guide` leaves the target latent noisy and supplies the previous scene as
 fixed conditioning rows. H3 regenerates the repeated head, and Loop Trim
 removes it. This remains the default.
 
+`latent_guide` preserves a real prefix in the target latent, but for generated
+scene-to-scene continuation it takes that prefix directly from the previous
+sampler's raw H3 video/audio latent. This avoids a video VAE decode/re-encode
+round trip between generated scenes. The prefix is protected by per-stream
+denoise masks and is still removed from delivered duration by Loop Trim. Scene
+1 after Existing Video Context has no sampled predecessor latent, so it uses
+the masked decoded-frame VAE fallback instead.
+
 Continuation mode can be overridden per scene in **Show advanced** without
 adding another scene-card row. The choice describes the transition **into that
-scene**: use `guide` for a new shot that should remember the preceding clip,
-and `masked_av` when the same shot should continue seamlessly. Scene 1 uses
-its choice only when Existing Video Context supplies a predecessor. In Plan
+scene**: use `guide` for a new shot with interpretive continuity, `latent_guide`
+when the generated predecessor's sampled AV latent should carry forward
+directly, and `masked_av` for the decoded-frame same-shot masked path. Scene 1
+uses its choice only when Existing Video Context supplies a predecessor. In Plan
 JSON, set `shots[n].continuation_mode`; omitting it inherits the Plan node.
 
 The same Advanced group has per-scene **Context into scene** and **Audio
@@ -150,25 +162,69 @@ starts a visually independent scene; a positive audio value can still carry
 dialogue, ambience, or music into that new shot. Explicit audio `0` carries no
 preceding generated sound. For scene 1, these control Existing Video Context;
 a zero-video-context imported original can still be prepended during assembly.
-Independent audio context applies to guide mode with generated-audio continuity.
-Masked AV always keeps its audio and video prefix lengths synchronized, while
-`source_track` continues to use its exact timeline slice.
+Independent audio context applies only to `guide` with generated-audio
+continuity. `latent_guide` and `masked_av` keep video and audio in one physical
+prefix interval, while `source_track` still controls the final soundtrack.
 
 `masked_av` writes the previous scene's decoded video tail into the beginning
 of the current target video latent, copies the matching tail from the previous
 sampled audio latent, and protects both streams with `0 = preserve`,
-`1 = generate` denoise masks. Wire the new **Chain Context latent** output to
-the sampler's `latent_image`; the output passes the original target through on
-scene 1 and in `guide` mode, so that one wire supports both modes.
+`1 = generate` denoise masks.
 
-Masked continuation requires `encode_mode=video`, `anchor_mode=head`, and at
-least 5 context frames, on a ComfyUI build with native PR #15439 guide/MultiRef
-support. Use **39 frames** for comparisons: at 24 fps it is
-exactly 1.625 seconds and exactly 65 audio-latent steps at H3's 40 Hz audio
-grid. A per-scene override participates in the Plan/history hashes from that
-scene onward, so a checkpoint cannot silently resume under the wrong method.
-When modes are mixed, use settings compatible with masked AV for the whole
-Plan—normally `context_length=39`, `encode_mode=video`, and `anchor_mode=head`.
+Wire **Chain Context latent** to the sampler's `latent_image` when a Plan may
+use `latent_guide` or `masked_av`; `guide` passes the original target latent
+through unchanged. Both latent modes require `encode_mode=video`,
+`anchor_mode=head`, and at least 5 context frames. `latent_guide` requires the
+per-stream AV-mask capability but does not require native Add Guide for its
+continuation prefix. `masked_av` also requires the native PR #15439
+guide/MultiRef baseline. Use **39 frames** for masked AV comparisons: at 24 fps
+it is exactly 1.625 seconds and exactly 65 audio-latent steps at H3's 40 Hz
+audio grid. A per-scene override participates in the Plan/history hashes from
+that scene onward, so a checkpoint cannot silently resume under the wrong
+method. When modes are mixed, use settings compatible with every latent-mode
+scene—normally `context_length=39`, `encode_mode=video`, and `anchor_mode=head`
+when masked AV is present.
+
+### Scene-local Guide Image anchors
+
+Use **MiniMax H3 Guide Image** nodes to build an image-anchor chain, then feed
+it to **MiniMax H3 Guide Images to Video**. Without H3 Chain state, frame
+indices address the generated clip directly and negative indices count from the
+end (`-1` is the final frame).
+
+For chain use, wire Current Shot's `prompt`, RAW `length`, `width`, `height`,
+and `state` into **Guide Images to Video**; its `positive` and `latent` outputs
+then feed Chain Context's `conditioning` and `latent` inputs. The node verifies
+that its generated frame count matches the current shot's planned `raw_frames`.
+
+With H3 Chain state connected, anchors use the scene's **visible delivered
+timeline** and every Guide Image must set `scene_index`:
+
+- scene 1 requires an explicit guide at visible frame `0`;
+- every non-final scene requires a guide at visible frame `-1`;
+- scene N automatically inherits scene N−1 frame `-1` as its visible frame `0`,
+  so do not add a second explicit frame `0` to later scenes;
+- scene-aware mode accepts non-negative visible indices and `-1`, rejects
+  duplicate scene/frame targets, and maps them onto the raw H3 timeline after
+  the preserved prefix.
+
+In `latent_guide`, the inherited start remains available to the prompt and is
+also anchored to the last preserved raw prefix frame, keeping that boundary
+conditioning outside prefix cleanup.
+
+### Optional full-segment seam diagnostics
+
+For visual join diagnosis, substitute **MiniMax H3 Contex Loop Full Segment
+Save** for the normal Segment + Checkpoint node. Keep the normal post-Trim
+`images` connection and additionally connect `images_before_trim` directly from
+the current VAE Decode output **before** Loop Trim. Its frame count must match
+the scene's planned `raw_frames` exactly.
+
+The node delegates the ordinary delivered segment, checkpoint, revision, audio,
+and Review Gate record to the standard saver, then writes one extra
+revision-versioned MP4 under `full_segments/`. The extra file contains the
+complete decoded sample, including the repeated prefix when one is present. It
+is diagnostic only and does not change delivered duration or final assembly.
 
 ## Audio at a glance
 
@@ -271,16 +327,17 @@ run folder. See
 - [Prompt and timing guide](H3_CHAIN_FORMAT_GUIDE.md) — complete Plan JSON and
   node-setting reference.
 - [Scene authoring](docs/SCENE_AUTHORING.md) — Plan editor, Prompt Editor,
-  revisions, seeds, and bounded ranges.
+  per-scene continuation modes, revisions, seeds, and bounded ranges.
 - [Scheduled references](docs/SCHEDULED_REFERENCES.md) — tags, selectors,
   numbering, previews, compliance, and fingerprints.
-- [Audio and continuity](docs/AUDIO_AND_CONTINUITY.md) — audio modes, 15.070 s
-  reference alignment, generated WAVs, trimming, and seam diagnostics.
+- [Audio and continuity](docs/AUDIO_AND_CONTINUITY.md) — guide, latent-guide,
+  and masked-AV continuity; audio modes; trimming; and seam diagnostics.
 - [Runs, review, and recovery](docs/RUNS_AND_RECOVERY.md) — Review Gate,
-  Checkpoint Manager, deferred upscale child runs, Run Manager assets, partial
-  output, and PNG export.
+  Checkpoint Manager, optional full-segment diagnostics, deferred upscale child
+  runs, Run Manager assets, partial output, and PNG export.
 - [Advanced workflows](docs/ADVANCED_WORKFLOWS.md) — existing-video extension,
-  long context, last-frame targets, and performance re-filming.
+  long context, Guide Image anchors, Full Segment diagnostics, last-frame
+  targets, and performance re-filming.
 - [Compatibility](docs/COMPATIBILITY.md) — patch ownership, native guides,
   SolAttn, H3-Multishot, and frontend workarounds.
 - [Example workflow notes](example_workflows/README.md)

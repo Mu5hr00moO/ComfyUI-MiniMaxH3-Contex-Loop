@@ -218,7 +218,7 @@ Shot = string | {
   "seed"?: integer | digit string,
   "context_length"?: 0 | 1 | 5 | 22 | 39 | ... | 243,
   "audio_context_length"?: integer, // 0..240
-  "continuation_mode"?: "guide" | "masked_av"
+  "continuation_mode"?: "guide" | "latent_guide" | "masked_av"
 }
 ```
 
@@ -478,11 +478,13 @@ The same plan and `base_seed` produce the same derived seeds. Changing a scene
 ID or moving it to another position changes its derived seed.
 
 `continuation_mode` describes the transition from the preceding clip into this
-scene. Omit it to inherit the Plan node setting. Use `guide` when this is a new
-shot that should retain motion/appearance context while allowing a different
-camera, action, or environment. Use `masked_av` when it directly continues the
-same shot and should preserve the preceding AV prefix exactly. Scene 1 uses the
-field only when Existing Video Context supplies a predecessor.
+scene. Omit it to inherit the Plan node setting. Use `guide` for decoded-frame
+conditioning and interpretive continuity, `latent_guide` when a generated
+predecessor's sampled raw H3 AV latent should be copied directly into the next
+target, and `masked_av` for the decoded-frame masked same-shot path. Scene 1
+uses the field only when Existing Video Context supplies a predecessor. Because
+an imported video has no sampled H3 predecessor latent, scene-1 `latent_guide`
+uses the masked decoded-frame VAE fallback.
 
 `context_length` overrides incoming video context for one scene. Omit it (or
 leave the visual selector blank) to inherit the Plan node setting. Set it to
@@ -490,13 +492,13 @@ leave the visual selector blank) to inherit the Plan node setting. Set it to
 choices as the Plan setting. Scene 1's override applies when Existing Video
 Context is connected.
 
-`audio_context_length` independently controls prior generated sound in guide
+`audio_context_length` independently controls prior generated sound in `guide`
 mode. Blank inherits the Plan audio setting; when that Plan setting is `0`, it
 follows the scene's effective video context. An explicit per-scene `0` means no
 audio carry, while a positive value can continue sound with video context `0`.
 It applies to `generated_audio` and `source_plus_timeline`; `source_track` uses
-its exact timeline slice. Masked AV ignores the independent value and preserves
-audio for the same physical interval as its video prefix.
+its exact timeline slice. `latent_guide` and `masked_av` ignore the independent
+value and preserve audio for the same physical interval as the video prefix.
 
 The compact Plan editor places these controls beside Steps under **Show
 advanced**; Plan Studio keeps them in the existing scene-properties row.
@@ -508,8 +510,8 @@ advanced**; Plan Studio keeps them in the existing scene-properties row.
 | `run_name` | Filename-safe text; normalized to at most 96 characters | Give each independent render a unique name. Keep it unchanged only when resuming. |
 | `generation_fingerprint` | Any stable version string | Include model, VAE, LoRA, global-reference, CFG, sampler, and scheduler versions. Change it when any external generation dependency changes. |
 | `width`, `height` | Positive multiples of 32, UI range 32–4096 | `960 × 544` is the supplied long-form workflow setting. |
-| `continuation_mode` | `guide` or `masked_av` | Inherited default for scenes without `shots[n].continuation_mode`. `guide` suits new shots; `masked_av` writes a preserved AV prefix for same-shot continuation and requires Chain Context's latent output to feed the sampler. |
-| `context_length` | `1`, then native runs `5`, `22`, `39`, ... `243` | Use `22` for guide mode. Use `39` for masked AV so 24 fps video and 40 Hz audio meet on an exact 65-step boundary. Masked AV requires at least 5. |
+| `continuation_mode` | `guide`, `latent_guide`, or `masked_av` | Inherited default for scenes without `shots[n].continuation_mode`. `guide` uses decoded-frame conditioning; `latent_guide` carries the previous sampled raw AV latent; `masked_av` writes a decoded-frame-derived preserved AV prefix. Wire Chain Context's latent output to the sampler when latent modes may be selected. |
+| `context_length` | `1`, then native runs `5`, `22`, `39`, ... `243` | Use `22` for guide/latent-guide work. Both latent modes require at least 5. Use `39` for masked AV when you want 24 fps video and 40 Hz audio to meet on an exact 65-step boundary. |
 | `encode_mode` | `video` or `frames` | Use `video`. It preserves motion inside the VAE latent and is more efficient. |
 | `anchor_mode` | `head` or `before` | Use `head`; wire `trim_frames` into MiniMax H3 Contex Loop Trim. |
 | `crop` | `disabled` or `center` | Use `disabled` when references and output already share the intended framing. |
@@ -519,6 +521,20 @@ advanced**; Plan Studio keeps them in the existing scene-properties row.
 | `default_steps` | `1`–`10000` | Used only when JSON defaults and the scene both omit steps. |
 | `base_seed` | Unsigned 64-bit integer | Source for deterministic seeds when a scene omits `seed`. |
 | `segment_crf` | `0`–`51` | H.264 checkpoint-segment quality. Lower is higher quality and larger. Start around `18`–`20`. |
+
+### Scene-aware Guide Image wiring
+
+For **MiniMax H3 Guide Images to Video** inside a chain, connect Current Shot's
+`prompt`, RAW `length`, `width`, `height`, and `state`, plus the H3 `clip` and
+video `vae`. Current Shot's `length` is the planned RAW H3 frame count; the guide
+node validates that its aligned generated frame count equals the active shot's
+`raw_frames`.
+
+Feed Guide Images to Video's `positive` and `latent` outputs into Chain Context's
+`conditioning` and `latent` inputs. Chain Context then applies the selected
+continuation mode and provides the sampler-ready conditioning/latent path.
+Scene-local guide indices remain on the visible delivered timeline; the guide
+node maps them onto the current RAW timeline from `state`.
 
 ### Which audio mode should I use for a voice?
 

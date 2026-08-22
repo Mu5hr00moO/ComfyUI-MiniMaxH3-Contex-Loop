@@ -4073,10 +4073,10 @@ class MiniMaxH3ChainPlan:
                                "previous video tail into the current target "
                                "latent, copies its sampled audio tail, and "
                                "protects both with per-stream denoise masks. "
-                               "latent_guide requires video mode and context "
-                               ">= 5; masked_av additionally requires head "
-                               "anchors and native or compatible H3 AV-mask "
-                               "support."}),
+                               "latent_guide requires video mode, head anchors, "
+                               "context >= 5, and native or compatible H3 AV-mask "
+                               "support. masked_av requires the same settings plus "
+                               "the native Add Guide / MultiRef core."}),
             },
             "optional": {
                 "plan_json_input": ("STRING", {
@@ -4784,11 +4784,11 @@ class MiniMaxH3ChainContext:
             },
             "optional": {
                 "audio_vae": ("VAE", {
-                    "tooltip": "H3 audio VAE used only when scene 1 continues "
-                               "from imported video audio. Later loop scenes "
-                               "reuse their saved AV latent directly. It may be "
-                               "left disconnected for visual-only context or "
-                               "source_track mode."}),
+                    "tooltip": "H3 audio VAE required when scene 1 continues "
+                               "from Existing Video Context in latent_guide or "
+                               "masked_av mode with active context. That path "
+                               "also requires context audio. Later loop scenes "
+                               "reuse their saved AV latent directly."}),
             }
         }
 

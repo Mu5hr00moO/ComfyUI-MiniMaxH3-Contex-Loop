@@ -24,6 +24,29 @@ The [complete format guide](../H3_CHAIN_FORMAT_GUIDE.md) documents every Plan
 and per-scene field, raw versus delivered length, prompt structure, seeds, and
 timing.
 
+## Per-scene continuation
+
+The Plan node's `continuation_mode` is the inherited default. Under **Show
+advanced**, a scene may override the transition **into that scene**:
+
+| Mode | Editor label | Operator meaning |
+|---|---|---|
+| `guide` | Guide · new shot | Re-encode decoded predecessor frames as conditioning and let H3 regenerate the repeated head. |
+| `latent_guide` | Latent Guide · raw latent | For generated predecessors, copy the previous sampler's raw AV latent tail directly into the next target and preserve it with AV masks. |
+| `masked_av` | Masked AV · same shot | VAE-encode the preceding decoded video tail into a preserved target prefix and pair it with the sampled audio tail. |
+
+`latent_guide` and `masked_av` require `encode_mode=video`,
+`anchor_mode=head`, and at least 5 context frames. Their video/audio prefix is
+one physical interval; the independent `audio_context_length` override applies
+only to `guide`. Scene 1 uses its continuation choice only when **Existing
+Video Context** supplies a predecessor. Because an imported video has no H3
+sampled predecessor latent, scene-1 `latent_guide` deliberately uses the masked
+decoded-frame VAE fallback.
+
+Set `shots[n].continuation_mode` in raw Plan JSON to persist an override. Omit
+it to inherit the Plan node. A changed mode participates in checkpoint/history
+compatibility from that scene onward.
+
 ## Scene Prompt Editor
 
 Connect Plan to **MiniMax H3 Scene Prompt Editor** for a large synchronized
