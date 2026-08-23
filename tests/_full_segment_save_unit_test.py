@@ -55,6 +55,8 @@ class WrongFullImages:
 def main():
     inputs = full.MiniMaxH3ChainFullSegmentSave.INPUT_TYPES()
     assert "images_before_trim" in inputs["required"]
+    assert "full_save" in inputs["required"]
+    assert inputs["required"]["full_save"][1]["default"] is False
 
     plan = {
         "segment_crf": 18,
@@ -85,12 +87,30 @@ def main():
     chain.MiniMaxH3ChainSegmentSave.save = fake_base_save
 
     try:
-        node.save(state, object(), object(), WrongFullImages())
+        node.save(
+            state,
+            object(),
+            object(),
+            WrongFullImages(),
+            full_save=True,
+        )
     except ValueError as exc:
         assert "received 6 full decoded frames; expected 7 raw frames" in str(exc)
     else:
         raise AssertionError("images_before_trim frame-count validation did not fire")
     assert not base_calls
+
+    disabled_result = node.save(
+        state,
+        object(),
+        object(),
+        WrongFullImages(),
+        full_save=False,
+    )
+    assert len(base_calls) == 1
+    assert disabled_result["result"][1] == "base status"
+
+    base_calls.clear()
 
     with tempfile.TemporaryDirectory() as tempdir:
         chain._run_dir = lambda _plan: tempdir
@@ -107,7 +127,13 @@ def main():
 
         chain._write_segment_video = fake_write
         images_before_trim = FakeFullImages()
-        result = node.save(state, object(), object(), images_before_trim)
+        result = node.save(
+            state,
+            object(),
+            object(),
+            images_before_trim,
+            full_save=True,
+        )
 
         assert len(base_calls) == 1
         assert len(write_calls) == 1
