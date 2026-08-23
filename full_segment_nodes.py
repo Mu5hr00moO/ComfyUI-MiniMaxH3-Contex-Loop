@@ -63,6 +63,16 @@ class MiniMaxH3ChainFullSegmentSave(chain.MiniMaxH3ChainSegmentSave):
     def INPUT_TYPES(cls) -> dict[str, Any]:
         inputs: dict[str, Any] = super().INPUT_TYPES()
         required: dict[str, Any] = dict(inputs["required"])
+        required["full_save"] = (
+            "BOOLEAN",
+            {
+                "default": False,
+                "tooltip": (
+                    "Save the decoded pre-trim full segment under full_segments. "
+                    "Disabled by default."
+                ),
+            },
+        )
         required["images_before_trim"] = (
             "IMAGE",
             {
@@ -91,6 +101,7 @@ class MiniMaxH3ChainFullSegmentSave(chain.MiniMaxH3ChainSegmentSave):
         images: Any,
         sampled_latent: Any,
         images_before_trim: Any,
+        full_save: bool = False,
         audio: Any = None,
         images_with_overlap: Any = None,
         denoised_latent: Any = None,
@@ -99,6 +110,18 @@ class MiniMaxH3ChainFullSegmentSave(chain.MiniMaxH3ChainSegmentSave):
         audio_with_overlap: Any = None,
     ) -> dict[str, Any]:
         """Save delivered artifacts, then the pre-trim diagnostic MP4."""
+        if not full_save:
+            return super().save(
+                state,
+                images,
+                sampled_latent,
+                audio=audio,
+                images_with_overlap=images_with_overlap,
+                denoised_latent=denoised_latent,
+                prompt=prompt,
+                extra_pnginfo=extra_pnginfo,
+                audio_with_overlap=audio_with_overlap,
+            )
         plan: dict[str, Any] = state["plan"]
         index = int(state["index"])
         shot = plan["shots"][index - 1]
