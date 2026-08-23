@@ -9,8 +9,27 @@ import tempfile
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-COMFY = next(path for path in (ROOT.parent / "Comfyui", ROOT.parent / "ComfyUI")
-             if (path / "comfy" / "options.py").is_file())
+
+COMFY_CANDIDATES = [
+    ROOT.parent / "Comfyui",
+    ROOT.parent / "ComfyUI",
+    ROOT.parent.parent,
+]
+
+COMFY = next(
+    (
+        path
+        for path in COMFY_CANDIDATES
+        if (path / "comfy" / "options.py").is_file()
+    ),
+    None,
+)
+
+if COMFY is None:
+    raise SystemExit(
+        "ComfyUI checkout not found next to the repo or above custom_nodes"
+    )
+
 sys.path.insert(0, str(COMFY))
 sys.argv = ["h3-upscale-test", "--cpu"]
 

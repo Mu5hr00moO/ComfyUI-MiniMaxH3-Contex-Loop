@@ -23,11 +23,16 @@ from datetime import datetime
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-COMFY_CANDIDATES = [ROOT.parent / "Comfyui", ROOT.parent / "ComfyUI"]
+COMFY_CANDIDATES = [
+    ROOT.parent / "Comfyui",
+    ROOT.parent / "ComfyUI",
+    ROOT.parent.parent,
+]
 COMFY = next((path for path in COMFY_CANDIDATES
               if (path / "comfy" / "options.py").is_file()), None)
 if COMFY is None:
-    raise SystemExit("adjacent ComfyUI checkout not found")
+    raise SystemExit(
+        "ComfyUI checkout not found next to the repo or above custom_nodes")
 
 sys.path.insert(0, str(COMFY))
 sys.argv = ["h3-chain-smoke", "--cpu"]

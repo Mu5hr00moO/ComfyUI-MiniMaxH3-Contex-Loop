@@ -62,6 +62,9 @@ class T:
     def clone(self):
         return T(self.a.copy())
 
+    def contiguous(self) -> "T":
+        return self
+
 
 class Nested:
     def __init__(self, parts):
@@ -270,11 +273,51 @@ def main():
         T(np.zeros((1, 16, latent_t, height, width))),
         T(np.zeros((1, 32, 2, audio_t))),
     ])}
-    previous = {"samples": Nested([
-        T(np.zeros((1, 16, latent_t, height, width))),
+    previous_video: np.ndarray = np.broadcast_to(
+        np.arange(latent_t, dtype=np.float64).reshape(1, 1, latent_t, 1, 1),
+        (1, 16, latent_t, height, width),
+    ).copy()
+    previous: dict[str, object] = {"samples": Nested([
+        T(previous_video),
         T(np.zeros((1, 32, 2, audio_t))),
     ])}
     context = T(np.zeros((124, 480, 864, 3)))
+
+    raw_video: np.ndarray = np.arange(
+        latent_t, dtype=np.float64
+    ).reshape(1, 1, latent_t, 1, 1)
+    raw_context: dict[str, object] = {"samples": Nested([
+        T(raw_video),
+        T(np.zeros((1, 1, 2, audio_t))),
+    ])}
+
+    tail_5: T = nodes._video_tail_from_latent(raw_context, 5)
+    assert tuple(tail_5.shape) == (1, 1, 2, 1, 1)
+    assert np.array_equal(
+        tail_5.a[0, 0, :, 0, 0],
+        np.arange(35, 37, dtype=np.float64),
+    )
+
+    tail_22: T = nodes._video_tail_from_latent(raw_context, 22)
+    assert tuple(tail_22.shape) == (1, 1, 7, 1, 1)
+    assert np.array_equal(
+        tail_22.a[0, 0, :, 0, 0],
+        np.arange(30, 37, dtype=np.float64),
+    )
+
+    tail_39: T = nodes._video_tail_from_latent(raw_context, 39)
+    assert tuple(tail_39.shape) == (1, 1, 12, 1, 1)
+    assert np.array_equal(
+        tail_39.a[0, 0, :, 0, 0],
+        np.arange(25, 37, dtype=np.float64),
+    )
+
+    try:
+        nodes._video_tail_from_latent(raw_context, 1)
+    except ValueError as error:
+        assert "temporal phase" in str(error)
+    else:
+        raise AssertionError("A one-frame raw latent tail must be rejected.")
 
     class VAE:
         def encode(self, images):

@@ -70,7 +70,23 @@ def main():
     sys.modules["comfy"].ldm = sys.modules["comfy.ldm"]
     sys.modules["comfy.ldm"].minimax = sys.modules["comfy.ldm.minimax"]
     sys.modules["comfy.ldm.minimax"].model = mm
-    sys.modules["torch"] = make_torch()
+    fake_torch = make_torch()
+    fake_torch.Tensor = T
+    sys.modules["torch"] = fake_torch
+
+    model_management = types.ModuleType("comfy.model_management")
+    model_management.intermediate_device = lambda: "cpu"
+    sys.modules["comfy.model_management"] = model_management
+    sys.modules["comfy"].model_management = model_management
+
+    nested_tensor = types.ModuleType("comfy.nested_tensor")
+    nested_tensor.NestedTensor = Nested
+    sys.modules["comfy.nested_tensor"] = nested_tensor
+    sys.modules["comfy"].nested_tensor = nested_tensor
+
+    comfy_nodes = types.ModuleType("nodes")
+    comfy_nodes.MAX_RESOLUTION = 16384
+    sys.modules["nodes"] = comfy_nodes
 
     cu = types.ModuleType("comfy.utils")
     cu.common_upscale = lambda s, w, h, m, c: T(

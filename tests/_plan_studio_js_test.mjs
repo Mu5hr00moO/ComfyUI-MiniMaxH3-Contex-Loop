@@ -80,6 +80,8 @@ assert.match(source, /field\("Continuation", continuation\)/);
 assert.match(source, /field\("Context V \/ A", contextPair\)/);
 assert.match(source, /audio_context_length/);
 assert.match(source, /Guide · new shot/);
+assert.match(source, /Raw Guide · raw latent/);
 assert.match(source, /Masked AV · same shot/);
+assert.match(source, /masked decoded-frame VAE fallback/);
 
 console.log("H3 Plan Studio: separate timeline editor contract passes");
