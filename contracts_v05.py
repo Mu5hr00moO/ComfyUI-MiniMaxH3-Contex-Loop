@@ -30,7 +30,7 @@ ADVANCED_TRANSITION_PRESETS = (
 DEFAULT_AUDIO_CONTEXT_LENGTH = 22
 CONTEXT_SPATIAL_PROXY_MODES = ("off", "rgb_5_6", "latent_5_6")
 CONTINUATION_POLICIES = (
-    "guide", "tone_carry_guide", "latent_guide", "tapered_guide",
+    "guide", "tone_carry_guide", "latent_guide", "raw_guide", "tapered_guide",
     "masked_av", "tapered_av", "feathered_av", "audio_feathered_av",
     "drift_control_av", "color_stable_drift_av")
 TRANSITION_CONTEXT_LENGTHS = (
@@ -386,6 +386,9 @@ def transition_policy(
         if mode == "latent_guide" and 0 < context < 5:
             raise ValueError(
                 "H3 Latent Guide requires at least 5 context frames.")
+        if mode == "raw_guide" and 0 < context < 5:
+            raise ValueError(
+                "H3 Raw Guide requires at least 5 context frames.")
         if (mode in (
                 "masked_av", "tapered_av", "feathered_av",
                 "audio_feathered_av", "drift_control_av",

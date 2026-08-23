@@ -1396,6 +1396,7 @@ function mount(node) {
             ["guide", "Guide · new shot"],
             ["tone_carry_guide", "Tone Carry Guide · corrected RGB context"],
             ["latent_guide", "Latent Guide · direct generated latent"],
+            ["raw_guide", "Raw Guide · protected sampled prefix"],
             ["tapered_guide", "Detail Guide · color injection"],
             ["tapered_av", "Detail AV · experimental latent taper"],
             ["drift_control_av", "Drift-Control AV · schedule-matched mask"],

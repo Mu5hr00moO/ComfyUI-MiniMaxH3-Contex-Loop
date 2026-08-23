@@ -236,6 +236,13 @@ def main():
     assert expert["continuation_mode"] == "feathered_av"
     assert expert["context_length"] == 39
     assert expert["expert_override"] is True
+    raw_guide = contracts.transition_policy(
+        "guide", expert_override=True,
+        continuation_mode="raw_guide", context_length=22)
+    assert raw_guide["preset"] == "guide"
+    assert raw_guide["continuation_mode"] == "raw_guide"
+    assert raw_guide["context_length"] == 22
+    assert raw_guide["expert_override"] is True
     migrated_expert = contracts.transition_policy(
         "soft_av", expert_override=True,
         continuation_mode="feathered_av_rgb", context_length=39)
@@ -290,6 +297,15 @@ def main():
         assert "at least 5" in str(exc)
     else:
         raise AssertionError("one-frame Latent Guide transition was accepted")
+    try:
+        contracts.transition_policy(
+            "guide", expert_override=True,
+            continuation_mode="raw_guide", context_length=1)
+    except ValueError as exc:
+        assert "Raw Guide" in str(exc)
+        assert "at least 5" in str(exc)
+    else:
+        raise AssertionError("one-frame Raw Guide transition was accepted")
     shape = contracts.source_timeline_shape()
     assert shape["version"] == contracts.SOURCE_TIMELINE_VERSION
     assert set(shape) == {

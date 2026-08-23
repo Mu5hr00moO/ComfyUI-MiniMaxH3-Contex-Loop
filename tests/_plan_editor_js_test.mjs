@@ -105,7 +105,7 @@ assert.equal(AUTO_SCENE_COLORS.length, 12);
 assert.deepEqual(
     CONTINUATION_MODES,
     [
-        "guide", "tone_carry_guide", "latent_guide", "tapered_guide",
+        "guide", "tone_carry_guide", "latent_guide", "raw_guide", "tapered_guide",
         "masked_av", "tapered_av", "feathered_av",
         "audio_feathered_av", "drift_control_av",
         "color_stable_drift_av",
@@ -627,6 +627,7 @@ assert.match(editorSource, /Latent 5\/6 proxy · AV/);
 assert.match(editorSource, /context_spatial_proxy/);
 assert.match(editorSource, /Guide · new shot/);
 assert.match(editorSource, /Latent Guide · direct generated latent/);
+assert.match(editorSource, /Raw Guide · protected sampled prefix/);
 assert.match(editorSource, /Detail Guide · color injection/);
 assert.match(editorSource, /Masked AV · same shot/);
 assert.match(editorSource, /Feathered AV · experimental dual-stream feather/);
