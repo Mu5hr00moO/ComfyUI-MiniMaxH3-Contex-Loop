@@ -94,7 +94,7 @@ Scene-aware rules are strict:
 
 The node rejects duplicate scene/frame targets and out-of-range visible indices.
 In standalone use without Chain state, indices address the generated clip
-directly and negative values count from its end. In `latent_guide`, an inherited
+directly and negative values count from its end. In `raw_guide`, an inherited
 start image remains a prompt image and is also anchored at the last preserved
 raw-prefix frame so prefix cleanup does not discard that boundary condition.
 

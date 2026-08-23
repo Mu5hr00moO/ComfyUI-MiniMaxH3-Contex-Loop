@@ -8,7 +8,7 @@ When H3 Chain state is connected, guides become scene-local:
 - scene N inherits scene N-1 frame -1 as its visible start (frame 0)
 - every non-final scene requires a visible frame -1
 - visible indices map onto the raw H3 timeline after the preserved prefix
-- latent_guide keeps that inherited start as a keyframe on the last
+- raw_guide keeps that inherited start as a keyframe on the last
   preserved raw frame so prefix-mask cleanup does not drop it
 """
 
@@ -143,10 +143,10 @@ def _inherited_start_keyframe(
     """Decide whether an inherited scene-start guide also becomes a keyframe.
 
     The image is always kept in the prompt. A temporal keyframe is attached
-    only in latent_guide when the preserved prefix is non-empty; it is then
+    only in raw_guide when the preserved prefix is non-empty; it is then
     anchored to the last preserved raw frame.
     """
-    if continuation_mode == "latent_guide" and visible_start_raw_index > 0:
+    if continuation_mode == "raw_guide" and visible_start_raw_index > 0:
         boundary_index: int = visible_start_raw_index - 1
         _log(
             verbose,
@@ -376,7 +376,7 @@ class MiniMaxH3GuideImagesToVideo:
         "MiniMax H3 image-to-video conditioning with any number of guide "
         "images. Standalone mode anchors images on the generated clip. With "
         "H3 Chain state, scene-local guides are mapped onto the raw timeline; "
-        "latent_guide mode keeps the inherited start on the preserved prefix "
+        "raw_guide mode keeps the inherited start on the preserved prefix "
         "boundary."
     )
 

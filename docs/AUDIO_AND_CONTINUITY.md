@@ -17,13 +17,13 @@ Continuation mode changes how the incoming AV history is carried:
 
 - `guide` uses decoded/re-encoded visual guides and may carry generated audio
   with its own `audio_context_length`;
-- `latent_guide` copies the previous sampler's raw H3 video/audio latent tail
+- `raw_guide` copies the previous sampler's raw H3 video/audio latent tail
   directly into the next target and preserves both streams with denoise masks;
 - experimental `masked_av` VAE-encodes the preceding decoded video tail into a
   preserved target prefix and pairs it with the matching previous sampled-audio
   tail.
 
-`latent_guide` and `masked_av` always preserve one matching video/audio prefix
+`raw_guide` and `masked_av` always preserve one matching video/audio prefix
 interval, including when final assembly uses `source_track`. They require at
 least 5 context frames, `encode_mode=video`, and `anchor_mode=head`. For scene 1
 after Existing Video Context, neither latent mode has a sampled predecessor AV
@@ -134,7 +134,7 @@ images output or audio.
 
 All three continuation modes return the repeated visual prefix length as
 `trim_frames`. In `guide`, those frames are regenerated from guide conditioning.
-In `latent_guide` and `masked_av`, they decode from preserved target-latent rows.
+In `raw_guide` and `masked_av`, they decode from preserved target-latent rows.
 Either way the prefix overlaps the preceding scene and must be removed from
 delivered duration.
 

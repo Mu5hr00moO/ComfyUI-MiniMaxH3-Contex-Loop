@@ -96,7 +96,7 @@ def main() -> None:
     state_scene_2 = {
         "index": 2,
         "plan": {
-            "compatibility": {"continuation_mode": "latent_guide"},
+            "compatibility": {"continuation_mode": "raw_guide"},
             "shots": [
                 {
                     "raw_frames": 124,

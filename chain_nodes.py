@@ -106,7 +106,7 @@ H3_CONTEXT_LENGTHS = (
     141, 158, 175, 192, 209, 226, 243,
 )
 AUDIO_MODES = ("source_track", "generated_audio", "source_plus_timeline")
-CONTINUATION_MODES = ("guide", "latent_guide", "masked_av")
+CONTINUATION_MODES = ("guide", "raw_guide", "masked_av")
 REFERENCE_AUDIO_TIMELINE_MODES = ("standalone", "source_timeline")
 
 PLAN_TYPE = "H3_CHAIN_PLAN"
@@ -1727,18 +1727,18 @@ def _normalize_plan(
             raise ValueError(
                 "Shot %d has unknown H3 continuation mode %r." %
                 (index, shot_continuation_mode))
-        if shot_context_length and shot_continuation_mode == "latent_guide":
+        if shot_context_length and shot_continuation_mode == "raw_guide":
             if shot_context_length < 5:
                 raise ValueError(
-                    "H3 latent guide continuation requires context_length of "
+                    "H3 raw guide continuation requires context_length of "
                     "at least 5 frames (shot %d)." % index)
             if encode_mode != "video":
                 raise ValueError(
-                    "H3 latent guide continuation requires encode_mode=video "
+                    "H3 raw guide continuation requires encode_mode=video "
                     "(shot %d)." % index)
             if anchor_mode != "head":
                 raise ValueError(
-                    "H3 latent guide continuation requires anchor_mode=head "
+                    "H3 raw guide continuation requires anchor_mode=head "
                     "because it preserves a real target-latent prefix that "
                     "Loop Trim must remove (shot %d)." % index)
         if shot_context_length and shot_continuation_mode == "masked_av":
@@ -3784,7 +3784,7 @@ class MiniMaxH3ChainExternalVideo:
                 "H3 existing-video source audio")
             first_continuation_mode = plan["shots"][0].get(
                 "continuation_mode", cfg.get("continuation_mode", "guide"))
-            if first_continuation_mode in ("masked_av", "latent_guide"):
+            if first_continuation_mode in ("masked_av", "raw_guide"):
                 # A clean target AV prefix is one physical interval. Unlike
                 # guide mode, masked continuation cannot use an independently
                 # sized audio-reference window.
@@ -4064,7 +4064,7 @@ class MiniMaxH3ChainPlan:
                     "tooltip": "Inherited default for scenes without a "
                                "per-scene continuation override. guide uses "
                                "decoded frames re-encoded by the video VAE. "
-                               "latent_guide uses the previous sampler's raw "
+                               "raw_guide uses the previous sampler's raw "
                                "video latent directly while regenerating the "
                                "same overlap; generated clips therefore avoid "
                                "the video VAE round trip. Imported scene-1 "
@@ -4073,7 +4073,7 @@ class MiniMaxH3ChainPlan:
                                "previous video tail into the current target "
                                "latent, copies its sampled audio tail, and "
                                "protects both with per-stream denoise masks. "
-                               "latent_guide requires video mode, head anchors, "
+                               "raw_guide requires video mode, head anchors, "
                                "context >= 5, and native or compatible H3 AV-mask "
                                "support. masked_av requires the same settings plus "
                                "the native Add Guide / MultiRef core."}),
@@ -4712,7 +4712,7 @@ class MiniMaxH3PatchPriority:
         return (conditioning, status)
 
 
-def _apply_latent_guide_continuation(
+def _apply_raw_guide_continuation(
     state,
     conditioning,
     vae,
@@ -4725,8 +4725,8 @@ def _apply_latent_guide_continuation(
     """Apply raw sampled prefix, or scene-1 decoded-frame VAE fallback."""
     previous_latent = state.get("previous_latent")
     if previous_latent is not None:
-        from .latent_guide_context import apply_latent_guide_prefix
-        out_conditioning, out_latent, trim = apply_latent_guide_prefix(
+        from .raw_guide_context import apply_raw_guide_prefix
+        out_conditioning, out_latent, trim = apply_raw_guide_prefix(
             conditioning=conditioning,
             latent=latent,
             previous_latent=previous_latent,
@@ -4735,15 +4735,15 @@ def _apply_latent_guide_continuation(
         return (out_conditioning, trim, True, out_latent)
     if not external_first:
         raise ValueError(
-            "H3 latent guide continuation has no previous sampled AV "
+            "H3 raw guide continuation has no previous sampled AV "
             "latent.")
     previous_frames = state.get("previous_frames")
     if previous_frames is None:
         raise ValueError(
-            "H3 latent guide external continuation has no previous "
+            "H3 raw guide external continuation has no previous "
             "frame checkpoint.")
     _LOG.info(
-        "H3 latent guide scene 1 has imported context but no native "
+        "H3 raw guide scene 1 has imported context but no native "
         "sampled latent; using the masked decoded-frame VAE fallback.")
     from .masked_context import apply_masked_prefix
     out_conditioning, out_latent, trim = apply_masked_prefix(
@@ -4779,13 +4779,13 @@ class MiniMaxH3ChainContext:
                     "tooltip": "The CURRENT scene's empty AV latent from the "
                                "stock H3 conditioning node. Chain Context "
                                "passes it through in guide mode or returns a "
-                               "masked preserved-prefix copy in latent_guide "
+                               "masked preserved-prefix copy in raw_guide "
                                "and masked_av modes."}),
             },
             "optional": {
                 "audio_vae": ("VAE", {
                     "tooltip": "H3 audio VAE required when scene 1 continues "
-                               "from Existing Video Context in latent_guide or "
+                               "from Existing Video Context in raw_guide or "
                                "masked_av mode with active context. That path "
                                "also requires context audio. Later loop scenes "
                                "reuse their saved AV latent directly."}),
@@ -4804,14 +4804,14 @@ class MiniMaxH3ChainContext:
         "True when preceding video or generated audio is carried, including "
         "audio-only guide continuation; false for a fully independent scene.",
         "Sampler-ready target latent. Guide mode passes the input latent "
-        "through unchanged. latent_guide and masked_av return a preserved AV "
+        "through unchanged. raw_guide and masked_av return a preserved AV "
         "prefix plus nested denoise mask. Wire this output to the sampler so "
         "Plan can switch modes safely.",
     )
     FUNCTION = "apply"
     CATEGORY = "conditioning/minimax/contex_loop"
     DESCRIPTION = ("Apply each scene's inherited or overridden guide, custom "
-                   "raw masked-AV latent guide, or upstream masked AV "
+                   "raw masked-AV raw guide, or upstream masked AV "
                    "continuation, including scene 1 Existing Video Context.")
 
     def apply(self, state, conditioning, vae, latent, audio_vae=None):
@@ -4845,16 +4845,16 @@ class MiniMaxH3ChainContext:
                     candidate, int(cfg["context_length"])
                 ) > 0
             }
-            if "latent_guide" in required_mask_modes:
-                from .latent_guide_context import (
-                    _require_latent_guide_mask_support,
+            if "raw_guide" in required_mask_modes:
+                from .raw_guide_context import (
+                    _require_raw_guide_mask_support,
                 )
-                _require_latent_guide_mask_support()
+                _require_raw_guide_mask_support()
             if "masked_av" in required_mask_modes:
                 # Keep the upstream masked_av capability gate unchanged.
                 from .masked_context import _require_h3_mask_support
                 _require_h3_mask_support()
-            if continuation_mode in ("latent_guide", "masked_av"):
+            if continuation_mode in ("raw_guide", "masked_av"):
                 prepared_conditioning = conditioning
             else:
                 prepared_conditioning = _prepare_native_guide_conditioning(
@@ -4865,8 +4865,8 @@ class MiniMaxH3ChainContext:
                 False,
                 latent,
             )
-        if continuation_mode == "latent_guide":
-            return _apply_latent_guide_continuation(
+        if continuation_mode == "raw_guide":
+            return _apply_raw_guide_continuation(
                 state,
                 conditioning,
                 vae,

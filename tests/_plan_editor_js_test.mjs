@@ -27,7 +27,7 @@ import {
 } from "../web/h3_chain_plan_core.mjs";
 
 assert.equal(AUTO_SCENE_COLORS.length, 12);
-assert.deepEqual(CONTINUATION_MODES, ["guide", "latent_guide", "masked_av"]);
+assert.deepEqual(CONTINUATION_MODES, ["guide", "raw_guide", "masked_av"]);
 assert.equal(H3_CONTEXT_LENGTHS.at(-1), 243);
 assert.equal(new Set(AUTO_SCENE_COLORS).size, AUTO_SCENE_COLORS.length);
 assert.equal(automaticSceneColor(0), AUTO_SCENE_COLORS[0]);
@@ -74,8 +74,8 @@ assert.equal(
     "masked_av",
 );
 assert.equal(
-    sceneContinuationMode({continuation_mode: "latent_guide"}, "guide"),
-    "latent_guide",
+    sceneContinuationMode({continuation_mode: "raw_guide"}, "guide"),
+    "raw_guide",
 );
 assert.throws(
     () => sceneContinuationMode({continuation_mode: "unknown"}, "guide"),
@@ -202,7 +202,7 @@ assert.match(calculatePlanTiming({shots: [
         id: "latent",
         prompt: "Continue.",
         length: 192,
-        continuation_mode: "latent_guide",
+        continuation_mode: "raw_guide",
     },
 ]}, {
     contextLength: 1,
@@ -210,7 +210,7 @@ assert.match(calculatePlanTiming({shots: [
     anchorMode: "before",
     continuationMode: "guide",
     defaultDurationSeconds: 5,
-}).errors.join("\n"), /Latent Guide requires/);
+}).errors.join("\n"), /Raw Guide requires/);
 
 const mixedContextTiming = calculatePlanTiming({shots: [
     {id: "one", prompt: "One.", length: 192},
@@ -326,7 +326,7 @@ assert.match(editorSource, /New random/);
 assert.match(editorSource, /Use derived/);
 assert.match(editorSource, /Continuation into scene/);
 assert.match(editorSource, /Guide · new shot/);
-assert.match(editorSource, /Latent Guide · raw latent/);
+assert.match(editorSource, /Raw Guide · raw latent/);
 assert.match(editorSource, /Masked AV · same shot/);
 assert.match(editorSource, /Video context/);
 assert.match(editorSource, /Audio context/);

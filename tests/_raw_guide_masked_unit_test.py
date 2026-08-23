@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CPU regression for the custom H3 raw masked-AV latent-guide prefix."""
+"""CPU regression for the custom H3 raw masked-AV raw-guide prefix."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ import torch.nn.functional as functional
 
 
 ROOT: str = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PACKAGE: str = "h3_latent_guide_mask_test_pkg"
+PACKAGE: str = "h3_raw_guide_mask_test_pkg"
 
 
 class NestedTensor:
@@ -110,9 +110,9 @@ def main() -> None:
 
     nodes = _load("nodes")
     masked_context = _load("masked_context")
-    custom = _load("latent_guide_context")
+    custom = _load("raw_guide_context")
     boundary_key: str = masked_context.PRESERVED_PREFIX_BOUNDARY_KEY
-    custom._require_latent_guide_mask_support = lambda: None
+    custom._require_raw_guide_mask_support = lambda: None
 
     target_frames: int = 192
     target_video_steps: int = 57
@@ -157,7 +157,7 @@ def main() -> None:
         ],
     }]]
 
-    out_conditioning, out, trim = custom.apply_latent_guide_prefix(
+    out_conditioning, out, trim = custom.apply_raw_guide_prefix(
         conditioning=conditioning,
         latent=target,
         previous_latent=previous,
@@ -227,7 +227,7 @@ def main() -> None:
     assert torch.all(target_audio == -2.0)
 
     print(
-        "latent guide masked AV: 39 frames -> 12 video / 65 audio steps; "
+        "raw guide masked AV: 39 frames -> 12 video / 65 audio steps; "
         "raw sampled prefixes copied, future target preserved, masks applied, "
         "and conflicting guides dropped"
     )

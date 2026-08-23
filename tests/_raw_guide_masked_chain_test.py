@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CPU routing regression for the custom raw masked-AV latent-guide mode."""
+"""CPU routing regression for the custom raw masked-AV raw-guide mode."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ if COMFY is None:
     raise SystemExit("ComfyUI checkout not found")
 
 sys.path.insert(0, str(COMFY))
-sys.argv = ["h3-latent-guide-masked-chain-test", "--cpu"]
+sys.argv = ["h3-raw-guide-masked-chain-test", "--cpu"]
 import comfy.options  # noqa: E402
 
 comfy.options.enable_args_parsing()
@@ -39,7 +39,7 @@ import torch  # noqa: E402
 
 def load_package() -> tuple[Any, Any, Any, Any]:
     """Load the node package and continuation modules used by this test."""
-    package_name: str = "h3_latent_guide_masked_chain_test_package"
+    package_name: str = "h3_raw_guide_masked_chain_test_package"
     spec = importlib.util.spec_from_file_location(
         package_name,
         ROOT / "__init__.py",
@@ -51,9 +51,9 @@ def load_package() -> tuple[Any, Any, Any, Any]:
     sys.modules[spec.name] = package
     spec.loader.exec_module(package)
     chain = sys.modules[spec.name + ".chain_nodes"]
-    latent_guide = importlib.import_module(spec.name + ".latent_guide_context")
+    raw_guide = importlib.import_module(spec.name + ".raw_guide_context")
     masked_context = importlib.import_module(spec.name + ".masked_context")
-    return package, chain, latent_guide, masked_context
+    return package, chain, raw_guide, masked_context
 
 
 def make_plan(
@@ -74,7 +74,7 @@ def make_plan(
                 ]
             }
         ),
-        "latent_guide_masked_routing",
+        "raw_guide_masked_routing",
         32,
         32,
         context_length,
@@ -125,7 +125,7 @@ def expect_value_error(callable_: Any, expected_text: str) -> None:
 
 def main() -> None:
     """Verify custom masked routing, upstream separation, and validation."""
-    _package, chain, latent_guide, masked_context = load_package()
+    _package, chain, raw_guide, masked_context = load_package()
     conditioning: list[Any] = [["conditioning", {}]]
     target_latent: dict[str, Any] = {"samples": "target"}
     previous_latent: dict[str, Any] = {"samples": "previous"}
@@ -134,11 +134,11 @@ def main() -> None:
         dtype=torch.float32,
     )
 
-    latent_plan: dict[str, Any] = make_plan(
+    raw_plan: dict[str, Any] = make_plan(
         chain,
-        continuation_mode="latent_guide",
+        continuation_mode="raw_guide",
     )
-    assert latent_plan["compatibility"]["continuation_mode"] == "latent_guide"
+    assert raw_plan["compatibility"]["continuation_mode"] == "raw_guide"
 
     captured_raw: dict[str, Any] = {}
 
@@ -149,31 +149,31 @@ def main() -> None:
     class ForbiddenMotionContext:
         def apply(self, **_kwargs: Any) -> tuple[Any, int]:
             raise AssertionError(
-                "latent_guide generated continuation must not use Motion Context"
+                "raw_guide generated continuation must not use Motion Context"
             )
 
-    real_raw_prefix: Any = latent_guide.apply_latent_guide_prefix
+    real_raw_prefix: Any = raw_guide.apply_raw_guide_prefix
     real_motion_context: Any = chain.MiniMaxH3MotionContext
-    latent_guide.apply_latent_guide_prefix = fake_raw_prefix
+    raw_guide.apply_raw_guide_prefix = fake_raw_prefix
     chain.MiniMaxH3MotionContext = ForbiddenMotionContext
     try:
-        latent_state: dict[str, Any] = make_state(
-            latent_plan,
+        raw_state: dict[str, Any] = make_state(
+            raw_plan,
             index=2,
             previous_frames=None,
             previous_latent=previous_latent,
         )
-        latent_result: tuple[Any, ...] = chain.MiniMaxH3ChainContext().apply(
-            latent_state,
+        raw_result: tuple[Any, ...] = chain.MiniMaxH3ChainContext().apply(
+            raw_state,
             conditioning,
             object(),
             target_latent,
         )
     finally:
-        latent_guide.apply_latent_guide_prefix = real_raw_prefix
+        raw_guide.apply_raw_guide_prefix = real_raw_prefix
         chain.MiniMaxH3MotionContext = real_motion_context
 
-    assert latent_result == (
+    assert raw_result == (
         "raw-masked",
         5,
         True,
@@ -217,7 +217,7 @@ def main() -> None:
     expect_value_error(
         lambda: chain.MiniMaxH3ChainContext().apply(
             make_state(
-                latent_plan,
+                raw_plan,
                 index=2,
                 previous_frames=previous_frames,
                 previous_latent=None,
@@ -240,7 +240,7 @@ def main() -> None:
     try:
         external_result: tuple[Any, ...] = chain.MiniMaxH3ChainContext().apply(
             make_state(
-                latent_plan,
+                raw_plan,
                 index=1,
                 previous_frames=previous_frames,
                 previous_latent=None,
@@ -266,7 +266,7 @@ def main() -> None:
     expect_value_error(
         lambda: make_plan(
             chain,
-            continuation_mode="latent_guide",
+            continuation_mode="raw_guide",
             context_length=1,
         ),
         "at least 5 frames",
@@ -274,7 +274,7 @@ def main() -> None:
     expect_value_error(
         lambda: make_plan(
             chain,
-            continuation_mode="latent_guide",
+            continuation_mode="raw_guide",
             encode_mode="frames",
         ),
         "requires encode_mode=video",
@@ -282,14 +282,14 @@ def main() -> None:
     expect_value_error(
         lambda: make_plan(
             chain,
-            continuation_mode="latent_guide",
+            continuation_mode="raw_guide",
             anchor_mode="before",
         ),
         "requires anchor_mode=head",
     )
 
     print(
-        "latent guide chain masked AV: generated continuation routes through "
+        "raw guide chain masked AV: generated continuation routes through "
         "the custom raw masked-prefix core, guide remains upstream, external "
         "scene 1 uses the explicit masked VAE fallback, and invalid plans are "
         "rejected"

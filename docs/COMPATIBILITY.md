@@ -10,7 +10,7 @@ The three continuation engines are capability-gated by the behavior they use:
 
 - `guide` prefers native Add Guide / MultiRef behavior from ComfyUI PR #15439
   and uses the existing guarded guide fallback only on older builds;
-- `latent_guide` uses per-stream H3 AV masks from PR #15375 to freeze a prefix
+- `raw_guide` uses per-stream H3 AV masks from PR #15375 to freeze a prefix
   copied directly from the previous sampled AV latent. Its continuation prefix
   does not require the native Add Guide API. Missing recognized mask helpers are
   enabled lazily when this mode executes;

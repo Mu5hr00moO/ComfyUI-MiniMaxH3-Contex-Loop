@@ -5,7 +5,7 @@ export const FPS = 24;
 export const MAX_SHOTS = 128;
 export const MAX_H3_FRAMES = 3592;
 export const MAX_SEED = 18446744073709551615n;
-export const CONTINUATION_MODES = Object.freeze(["guide", "latent_guide", "masked_av"]);
+export const CONTINUATION_MODES = Object.freeze(["guide", "raw_guide", "masked_av"]);
 export const H3_CONTEXT_LENGTHS = Object.freeze([
     1, 5, 22, 39, 56, 73, 90, 107, 124,
     141, 158, 175, 192, 209, 226, 243,
@@ -555,9 +555,9 @@ export function calculatePlanTiming(plan, settings = {}) {
                 shot, planContinuationMode,
             );
             if (sceneContext > 0
-                    && ["latent_guide", "masked_av"].includes(continuationMode)) {
-                const continuationLabel = continuationMode === "latent_guide"
-                    ? "Latent Guide"
+                    && ["raw_guide", "masked_av"].includes(continuationMode)) {
+                const continuationLabel = continuationMode === "raw_guide"
+                    ? "Raw Guide"
                     : "Masked AV";
                 if (sceneContext < 5) {
                     rowErrors.push(
@@ -603,7 +603,7 @@ export function calculatePlanTiming(plan, settings = {}) {
             deliveredSeconds: deliveredFrames / FPS,
             generationStartFrame,
             contextLength: sceneContext,
-            audioContextLength: ["latent_guide", "masked_av"].includes(continuationMode)
+            audioContextLength: ["raw_guide", "masked_av"].includes(continuationMode)
                 ? sceneContext : sceneAudioContext,
             continuationMode,
             errors: rowErrors,

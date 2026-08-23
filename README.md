@@ -33,8 +33,8 @@ giant cumulative image tensor.
 | 🔬 | In-graph audio-seam diagnostics and optional pre-trim Full Segment MP4s |
 
 In the default `guide` mode, updated ComfyUI core owns guide placement and
-reference-payload merging. `latent_guide` and the experimental `masked_av` mode
-use per-stream H3 video/audio noise masks from merged PR #15375. `latent_guide`
+reference-payload merging. `raw_guide` and the experimental `masked_av` mode
+use per-stream H3 video/audio noise masks from merged PR #15375. `raw_guide`
 copies the previous sampler's raw AV tail directly into the next target latent;
 `masked_av` VAE-encodes the preceding decoded video tail instead. Current
 ComfyUI owns the mask path natively; older builds lazily receive the vendored
@@ -121,7 +121,7 @@ instead of overwriting an MP4 with the same requested name.
 | Setting | Good starting point | Meaning |
 |---|---:|---|
 | `width × height` | `960 × 544` | Multiples of 32 |
-| `continuation_mode` | `guide` | Default for scenes without an override; choose `guide`, `latent_guide`, or `masked_av` per transition |
+| `continuation_mode` | `guide` | Default for scenes without an override; choose `guide`, `raw_guide`, or `masked_av` per transition |
 | `context_length` | `22` guide/latent / `39` masked | Repeated history carried into continuations; latent modes require at least 5 frames |
 | `encode_mode` | `video` | Preserves motion in the VAE latent |
 | `anchor_mode` | `head` | Regenerates then trims the repeated opening context |
@@ -134,13 +134,13 @@ Use `generation_fingerprint` to record model, VAE, LoRA, references, CFG,
 sampler, and scheduler choices that live outside the Plan. Change it when those
 dependencies change so incompatible checkpoints cannot be resumed silently.
 
-### Guide, latent guide, and masked AV continuation
+### Guide, raw guide, and masked AV continuation
 
 `guide` leaves the target latent noisy and supplies the previous scene as
 fixed conditioning rows. H3 regenerates the repeated head, and Loop Trim
 removes it. This remains the default.
 
-`latent_guide` preserves a real prefix in the target latent, but for generated
+`raw_guide` preserves a real prefix in the target latent, but for generated
 scene-to-scene continuation it takes that prefix directly from the previous
 sampler's raw H3 video/audio latent. This avoids a video VAE decode/re-encode
 round trip between generated scenes. The prefix is protected by per-stream
@@ -150,7 +150,7 @@ the masked decoded-frame VAE fallback instead.
 
 Continuation mode can be overridden per scene in **Show advanced** without
 adding another scene-card row. The choice describes the transition **into that
-scene**: use `guide` for a new shot with interpretive continuity, `latent_guide`
+scene**: use `guide` for a new shot with interpretive continuity, `raw_guide`
 when the generated predecessor's sampled AV latent should carry forward
 directly, and `masked_av` for the decoded-frame same-shot masked path. Scene 1
 uses its choice only when Existing Video Context supplies a predecessor. In Plan
@@ -163,7 +163,7 @@ dialogue, ambience, or music into that new shot. Explicit audio `0` carries no
 preceding generated sound. For scene 1, these control Existing Video Context;
 a zero-video-context imported original can still be prepended during assembly.
 Independent audio context applies only to `guide` with generated-audio
-continuity. `latent_guide` and `masked_av` keep video and audio in one physical
+continuity. `raw_guide` and `masked_av` keep video and audio in one physical
 prefix interval, while `source_track` still controls the final soundtrack.
 
 `masked_av` writes the previous scene's decoded video tail into the beginning
@@ -172,9 +172,9 @@ sampled audio latent, and protects both streams with `0 = preserve`,
 `1 = generate` denoise masks.
 
 Wire **Chain Context latent** to the sampler's `latent_image` when a Plan may
-use `latent_guide` or `masked_av`; `guide` passes the original target latent
+use `raw_guide` or `masked_av`; `guide` passes the original target latent
 through unchanged. Both latent modes require `encode_mode=video`,
-`anchor_mode=head`, and at least 5 context frames. `latent_guide` requires the
+`anchor_mode=head`, and at least 5 context frames. `raw_guide` requires the
 per-stream AV-mask capability but does not require native Add Guide for its
 continuation prefix. `masked_av` also requires the native PR #15439
 guide/MultiRef baseline. Use **39 frames** for masked AV comparisons: at 24 fps
@@ -208,7 +208,7 @@ timeline** and every Guide Image must set `scene_index`:
   duplicate scene/frame targets, and maps them onto the raw H3 timeline after
   the preserved prefix.
 
-In `latent_guide`, the inherited start remains available to the prompt and is
+In `raw_guide`, the inherited start remains available to the prompt and is
 also anchored to the last preserved raw prefix frame, keeping that boundary
 conditioning outside prefix cleanup.
 
@@ -330,7 +330,7 @@ run folder. See
   per-scene continuation modes, revisions, seeds, and bounded ranges.
 - [Scheduled references](docs/SCHEDULED_REFERENCES.md) — tags, selectors,
   numbering, previews, compliance, and fingerprints.
-- [Audio and continuity](docs/AUDIO_AND_CONTINUITY.md) — guide, latent-guide,
+- [Audio and continuity](docs/AUDIO_AND_CONTINUITY.md) — guide, raw-guide,
   and masked-AV continuity; audio modes; trimming; and seam diagnostics.
 - [Runs, review, and recovery](docs/RUNS_AND_RECOVERY.md) — Review Gate,
   Checkpoint Manager, optional full-segment diagnostics, deferred upscale child
