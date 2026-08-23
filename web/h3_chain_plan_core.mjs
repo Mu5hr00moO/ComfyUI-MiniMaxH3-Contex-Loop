@@ -6,7 +6,7 @@ export const MAX_SHOTS = 128;
 export const MAX_H3_FRAMES = 3592;
 export const MAX_SEED = 18446744073709551615n;
 export const CONTINUATION_MODES = Object.freeze([
-    "guide", "tone_carry_guide", "latent_guide", "tapered_guide",
+    "guide", "tone_carry_guide", "latent_guide", "raw_guide", "tapered_guide",
     "masked_av", "tapered_av", "feathered_av", "audio_feathered_av",
     "drift_control_av", "color_stable_drift_av",
 ]);
@@ -643,6 +643,19 @@ export function calculatePlanTiming(plan, settings = {}) {
                     rowErrors.push(
                         "Drift-Control AV and Color-Stable Drift AV currently require exactly 39 context frames.",
                     );
+                }
+            }
+            if (sceneContext > 0 && continuationMode === "raw_guide") {
+                if (sceneContext < 5) {
+                    rowErrors.push(
+                        "Raw Guide requires a context length of at least 5 frames.",
+                    );
+                }
+                if (encodeMode !== "video") {
+                    rowErrors.push("Raw Guide requires video encode mode.");
+                }
+                if (anchorMode !== "head") {
+                    rowErrors.push("Raw Guide requires head anchor mode.");
                 }
             }
             if (sceneContext > 0 && continuationMode === "latent_guide") {

@@ -161,15 +161,18 @@ H3_CONTEXT_LENGTHS = (
 )
 AUDIO_MODES = ("source_track", "generated_audio", "source_plus_timeline")
 CONTINUATION_MODES = (
-    "guide", "tone_carry_guide", "latent_guide", "tapered_guide",
-    "masked_av", "tapered_av", "feathered_av", "audio_feathered_av",
-    "drift_control_av", "color_stable_drift_av")
+    "guide", "tone_carry_guide", "latent_guide", "raw_guide",
+    "tapered_guide", "masked_av", "tapered_av", "feathered_av",
+    "audio_feathered_av", "drift_control_av", "color_stable_drift_av")
 LOOP_MEMORY_POLICIES = ("off", "unload_models", "fresh_scene")
 GUIDE_CONTINUATION_MODES = frozenset((
     "guide", "tone_carry_guide", "latent_guide", "tapered_guide"))
+RAW_GUIDE_CONTINUATION_MODES = frozenset(("raw_guide",))
 MASKED_CONTINUATION_MODES = frozenset((
     "masked_av", "tapered_av", "feathered_av", "audio_feathered_av",
     "drift_control_av", "color_stable_drift_av"))
+PROTECTED_PREFIX_CONTINUATION_MODES = (
+    RAW_GUIDE_CONTINUATION_MODES | MASKED_CONTINUATION_MODES)
 DISPOSABLE_PREFIX_CONTINUATION_MODES = frozenset((
     "tapered_av", "drift_control_av", "color_stable_drift_av"))
 DRIFT_CONTROL_CONTINUATION_MODES = frozenset((
@@ -2307,10 +2310,11 @@ def _scheduled_video_reference_slice(
     continuation_mode = current.get(
         "continuation_mode", compatibility.get("continuation_mode", "guide"))
     if (entry.get("semantic_role") == "motion"
-            and continuation_mode in MASKED_CONTINUATION_MODES):
+            and continuation_mode in PROTECTED_PREFIX_CONTINUATION_MODES):
         # Native Ref2VA video banks carry no target-frame coordinates. A
-        # masked continuation already owns the repeated prefix, so including
-        # those reference frames makes H3 replay them once the denoisable tail
+        # protected-prefix continuation already owns the repeated prefix, so
+        # including those reference frames makes H3 replay them once the
+        # denoisable tail
         # begins (one context span late). Advance only the motion video on
         # the delivered timeline. Its paired soundtrack still describes the
         # complete raw target, including the repeated prefix, and therefore
@@ -4236,12 +4240,12 @@ def _scene_dependency_record(
         # Omit the disabled spelling so pre-switch scene-dependency records
         # remain byte-for-byte compatible with unchanged 0.5 runs.
         scopes["global_generation"]["source_audio_target"] = "locked"
-    if transition in MASKED_CONTINUATION_MODES:
-        # v2 separates a masked motion video's delivered-only bank from its
-        # paired soundtrack's full raw target window, and obeys Generated
-        # continuity when deciding whether to preserve the predecessor audio
-        # latent. Keep that generation-significant behavior explicit so a
-        # pre-fix masked scene cannot be resumed as if it used the new clocks.
+    if transition in PROTECTED_PREFIX_CONTINUATION_MODES:
+        # v2 separates a protected-prefix motion video's delivered-only bank
+        # from its paired soundtrack's full raw target window, and obeys
+        # Generated continuity when deciding whether to preserve predecessor
+        # audio. Keep that generation-significant behavior explicit so a
+        # pre-fix scene cannot be resumed as if it used the new clocks.
         scopes["incoming_boundary"]["masked_audio_contract"] = (
             MASKED_AUDIO_CONTRACT)
     if context_spatial_proxy != "off":
@@ -5027,6 +5031,21 @@ def _normalize_plan(
                 raise ValueError(
                     "Shot 1 cannot use a 5/6 context spatial proxy: Existing "
                     "Video Context has no sampled predecessor latent.")
+        if (shot_context_length and
+                shot_continuation_mode in RAW_GUIDE_CONTINUATION_MODES):
+            if shot_context_length < 5:
+                raise ValueError(
+                    "H3 Raw Guide requires context_length of at least 5 "
+                    "frames (shot %d)." % index)
+            if encode_mode != "video":
+                raise ValueError(
+                    "H3 Raw Guide requires encode_mode=video (shot %d)." %
+                    index)
+            if anchor_mode != "head":
+                raise ValueError(
+                    "H3 Raw Guide requires anchor_mode=head because it "
+                    "preserves a real target-latent prefix that Loop Trim "
+                    "must remove (shot %d)." % index)
         if (shot_context_length and
                 shot_continuation_mode in MASKED_CONTINUATION_MODES):
             if shot_context_length not in AV_TRANSITION_CONTEXT_LENGTHS:
@@ -8846,10 +8865,10 @@ class MiniMaxH3ChainExternalVideo:
                 "H3 existing-video source audio")
             first_continuation_mode = plan["shots"][0].get(
                 "continuation_mode", cfg.get("continuation_mode", "guide"))
-            if first_continuation_mode in MASKED_CONTINUATION_MODES:
+            if first_continuation_mode in PROTECTED_PREFIX_CONTINUATION_MODES:
                 # A clean target AV prefix is one physical interval. Unlike
-                # guide mode, masked continuation cannot use an independently
-                # sized audio-reference window.
+                # guide mode, protected-prefix continuation cannot use an
+                # independently sized audio-reference window.
                 audio_context_frames = min(normalized_count, context_length)
             else:
                 audio_context_frames = min(
@@ -9605,7 +9624,7 @@ def _preflight_reference_window(
             "continuation_mode",
             plan["compatibility"].get("continuation_mode", "guide")))
         if (entry.get("semantic_role") == "motion"
-                and current_mode in MASKED_CONTINUATION_MODES):
+                and current_mode in PROTECTED_PREFIX_CONTINUATION_MODES):
             start = sum(int(item["delivered_frames"])
                         for item in shots[origin - 1:int(scene) - 1])
             length = int(shot["delivered_frames"])
@@ -11211,6 +11230,14 @@ class MiniMaxH3ChainContext:
             and audio_context_length > 0)
         has_context = context_length > 0 or generated_audio_context
         if not has_context or (index == 1 and not external_first):
+            raw_guide_required = any(
+                candidate.get(
+                    "continuation_mode",
+                    cfg.get("continuation_mode", "guide"))
+                in RAW_GUIDE_CONTINUATION_MODES
+                and _shot_context_length(
+                    candidate, int(cfg["context_length"])) > 0
+                for candidate in plan["shots"])
             masked_required = any(
                     candidate.get(
                         "continuation_mode",
@@ -11227,6 +11254,10 @@ class MiniMaxH3ChainContext:
                 and _shot_context_length(
                     candidate, int(cfg["context_length"])) > 0
                 for candidate in plan["shots"])
+            if raw_guide_required:
+                from .raw_guide_context import _require_raw_guide_mask_support
+
+                _require_raw_guide_mask_support()
             if masked_required:
                 # Fail before spending minutes on scene 1 if this ComfyUI
                 # cannot run a masked continuation required by a later scene.
@@ -11241,7 +11272,7 @@ class MiniMaxH3ChainContext:
                     "switch, connect the original full schedule to "
                     "drift_sigmas and put a Drift-Control Model Patch on "
                     "each raw model branch before generating scene 1.")
-            if continuation_mode in MASKED_CONTINUATION_MODES:
+            if continuation_mode in PROTECTED_PREFIX_CONTINUATION_MODES:
                 prepared_conditioning = conditioning
             else:
                 prepared_conditioning = _prepare_native_guide_conditioning(
@@ -11253,6 +11284,47 @@ class MiniMaxH3ChainContext:
                 target_latent,
                 model,
             )
+        if continuation_mode in RAW_GUIDE_CONTINUATION_MODES:
+            from .raw_guide_context import (
+                apply_raw_guide_imported_prefix,
+                apply_raw_guide_prefix,
+            )
+
+            preserve_audio_prefix = (
+                _audio_policy_uses_generated_continuity(cfg)
+                and not source_audio_locked
+                and audio_context_length > 0)
+            previous_latent = state.get("previous_latent")
+            if previous_latent is not None:
+                out_conditioning, out_latent, trim = apply_raw_guide_prefix(
+                    conditioning=conditioning,
+                    latent=target_latent,
+                    previous_latent=previous_latent,
+                    context_length=context_length,
+                    preserve_audio_prefix=preserve_audio_prefix,
+                )
+            elif external_first:
+                previous_frames = _previous_context_frames(
+                    state, vae, context_length)
+                out_conditioning, out_latent, trim = (
+                    apply_raw_guide_imported_prefix(
+                        conditioning=conditioning,
+                        vae=vae,
+                        latent=target_latent,
+                        previous_frames=previous_frames,
+                        context_length=context_length,
+                        crop=cfg["crop"],
+                        audio_vae=audio_vae,
+                        previous_audio=state.get("previous_audio"),
+                        preserve_audio_prefix=preserve_audio_prefix,
+                    )
+                )
+            else:
+                raise ValueError(
+                    "H3 Raw Guide continuation has no previous sampled AV "
+                    "latent.")
+            return (out_conditioning, trim, True, out_latent, model)
+
         previous_frames = _previous_context_frames(
             state, vae, context_length)
         if continuation_mode in MASKED_CONTINUATION_MODES:
@@ -11678,7 +11750,8 @@ class MiniMaxH3ChainSegmentSave:
                         "H3 chain clip %d received invalid private Loop Trim "
                         "AV overlap audio metadata." % index) from exc
             if (overlap_waveform is not None and repeated_frames > 0
-                    and continuation_mode in MASKED_CONTINUATION_MODES):
+                    and continuation_mode in
+                    PROTECTED_PREFIX_CONTINUATION_MODES):
                 if not torch.is_tensor(overlap_waveform) or (
                         overlap_waveform.ndim not in (1, 2, 3)):
                     raise ValueError(
@@ -11713,7 +11786,7 @@ class MiniMaxH3ChainSegmentSave:
                 tensors["audio_with_overlap"] = _tensor_cpu_clone(
                     overlap_waveform)
             elif (repeated_frames > 0
-                  and continuation_mode in MASKED_CONTINUATION_MODES
+                  and continuation_mode in PROTECTED_PREFIX_CONTINUATION_MODES
                   and _audio_policy_final(plan) == "generated"):
                 _LOG.warning(
                     "H3 Chain clip %d uses %s with generated final audio, but "
@@ -13261,7 +13334,7 @@ def _generated_audio(manifest: dict[str, Any]) -> dict[str, Any]:
         start_frame = cumulative_frames
         use_overlap = (
             ordinal > 0
-            and record["mode"] in MASKED_CONTINUATION_MODES
+            and record["mode"] in PROTECTED_PREFIX_CONTINUATION_MODES
             and record["repeated_frames"] > 0
             and record["overlap"] is not None)
         if use_overlap:
@@ -13276,7 +13349,7 @@ def _generated_audio(manifest: dict[str, Any]) -> dict[str, Any]:
                 "the incoming boundary.", int(segment["index"]),
                 int(record["repeated_frames"]))
         elif (ordinal > 0
-              and record["mode"] in MASKED_CONTINUATION_MODES
+              and record["mode"] in PROTECTED_PREFIX_CONTINUATION_MODES
               and record["repeated_frames"] > 0):
             _LOG.warning(
                 "H3 generated audio: legacy clip %d has no saved overlap "
@@ -13305,7 +13378,7 @@ def _generated_audio(manifest: dict[str, Any]) -> dict[str, Any]:
 
     result = {"waveform": assembled, "sample_rate": int(sample_rate)}
     first_record = records[0]
-    if (first_record["mode"] in MASKED_CONTINUATION_MODES
+    if (first_record["mode"] in PROTECTED_PREFIX_CONTINUATION_MODES
             and first_record["repeated_frames"] > 0
             and first_record["overlap"] is not None):
         # Preserve scene 1's complete decoded AV window until an optional
