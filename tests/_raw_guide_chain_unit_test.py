@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CPU routing regression for raw-guide integration on the 0.5.11 chain."""
+"""CPU routing regression for raw-guide integration on the 0.5.18 chain."""
 
 from __future__ import annotations
 
@@ -62,13 +62,23 @@ def make_plan(
     context_length: int = 22,
     encode_mode: str = "video",
     anchor_mode: str = "head",
+    second_scene_generated_continuity: str | None = None,
 ) -> dict[str, Any]:
     """Build a minimal two-scene plan for continuation routing tests."""
+    second_shot: dict[str, Any] = {
+        "id": "two",
+        "prompt": "second",
+        "length": 56,
+    }
+    if second_scene_generated_continuity is not None:
+        second_shot["generated_continuity"] = (
+            second_scene_generated_continuity
+        )
     return chain._normalize_plan(
         json.dumps({
             "shots": [
                 {"id": "one", "prompt": "first", "length": 56},
-                {"id": "two", "prompt": "second", "length": 56},
+                second_shot,
             ]
         }),
         "raw_guide_chain_unit",
@@ -179,6 +189,34 @@ def main() -> None:
     assert captured_raw["context_length"] == 22
     assert captured_raw["preserve_audio_prefix"] is True
 
+    raw_plan_audio_off = make_plan(
+        chain,
+        continuation_mode="raw_guide",
+        second_scene_generated_continuity="off",
+    )
+    captured_raw.clear()
+    raw_guide.apply_raw_guide_prefix = fake_raw_prefix
+    chain._previous_context_frames = forbidden_previous_frames
+    chain.MiniMaxH3MotionContext = ForbiddenMotionContext
+    try:
+        chain.MiniMaxH3ChainContext().apply(
+            make_state(
+                raw_plan_audio_off,
+                index=2,
+                previous_latent=previous_latent,
+            ),
+            conditioning,
+            object(),
+            target_latent,
+            model=model,
+        )
+    finally:
+        raw_guide.apply_raw_guide_prefix = real_raw_prefix
+        chain._previous_context_frames = real_previous_frames
+        chain.MiniMaxH3MotionContext = real_motion_context
+
+    assert captured_raw["preserve_audio_prefix"] is False
+
     gate_calls: list[str] = []
     real_raw_gate = raw_guide._require_raw_guide_mask_support
     real_prepare = chain._prepare_native_guide_conditioning
@@ -286,7 +324,7 @@ def main() -> None:
     )
 
     print(
-        "raw guide chain 0.5.11: 22-frame validation, early capability gate, "
+        "raw guide chain 0.5.18: 22-frame validation, early capability gate, "
         "direct sampled-latent routing, imported fallback, and upstream mode "
         "separation passed"
     )

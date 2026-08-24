@@ -12236,7 +12236,7 @@ class MiniMaxH3ChainContext:
             )
 
             preserve_audio_prefix = (
-                _audio_policy_uses_generated_continuity(cfg)
+                _audio_policy_uses_generated_continuity(cfg, shot)
                 and not source_audio_locked
                 and audio_context_length > 0)
             previous_latent = state.get("previous_latent")
