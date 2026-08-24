@@ -146,7 +146,13 @@ def _inherited_start_keyframe(
     only in raw_guide when the preserved prefix is non-empty; it is then
     anchored to the last preserved raw frame.
     """
-    if continuation_mode == "raw_guide" and visible_start_raw_index > 0:
+    enable_inherited_boundary_keyframe: bool = True
+
+    if (
+        enable_inherited_boundary_keyframe
+        and continuation_mode == "raw_guide"
+        and visible_start_raw_index > 0
+    ):
         boundary_index: int = visible_start_raw_index - 1
         _log(
             verbose,
