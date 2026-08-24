@@ -9,7 +9,7 @@ When H3 Chain state is connected, guides become scene-local:
 - every non-final scene requires a visible frame -1
 - visible indices map onto the raw H3 timeline after the preserved prefix
 - raw_guide keeps that inherited start as a keyframe on the last
-  preserved raw frame so prefix-mask cleanup does not drop it
+  preserved raw frame when its boundary option is enabled
 """
 
 from __future__ import annotations
@@ -41,6 +41,7 @@ class GuideImageSpec(TypedDict):
     frame_index: int
     scene_index: int | None
     label: str | None
+    boundary: bool
 
 
 GuideImageChain: TypeAlias = tuple[GuideImageSpec, ...]
@@ -142,14 +143,13 @@ def _inherited_start_keyframe(
 ) -> dict[str, Any] | None:
     """Decide whether an inherited scene-start guide also becomes a keyframe.
 
-    The image is always kept in the prompt. A temporal keyframe is attached
-    only in raw_guide when the preserved prefix is non-empty; it is then
-    anchored to the last preserved raw frame.
+    The image is always kept in the prompt. When boundary is enabled, a
+    temporal keyframe is attached in raw_guide if the preserved prefix is
+    non-empty; it is then anchored to the last preserved raw frame.
     """
-    enable_inherited_boundary_keyframe: bool = True
 
     if (
-        enable_inherited_boundary_keyframe
+        bool(item.get("boundary", True))
         and continuation_mode == "raw_guide"
         and visible_start_raw_index > 0
     ):
@@ -227,6 +227,18 @@ class MiniMaxH3GuideImage:
                         "tooltip": "Optional human-readable label used by verbose logging.",
                     },
                 ),
+                "boundary": (
+                    "BOOLEAN",
+                    {
+                        "default": True,
+                        "tooltip": (
+                            "When this guide is frame -1 and is inherited by the next "
+                            "raw_guide scene, also attach it as a temporal keyframe at "
+                            "the preserved-prefix boundary. The image remains in prompt "
+                            "conditioning when disabled."
+                        ),
+                    },
+                ),
                 "guide_images": (
                     GUIDE_IMAGES_TYPE,
                     {
@@ -260,6 +272,7 @@ class MiniMaxH3GuideImage:
         guide_images: GuideImageChain | None = None,
         scene_index: int | None = None,
         label: str = "",
+        boundary: bool = True,
     ) -> tuple[GuideImageChain]:
         chain: GuideImageChain = tuple(guide_images or ())
         item: GuideImageSpec = {
@@ -267,6 +280,7 @@ class MiniMaxH3GuideImage:
             "frame_index": int(frame_index),
             "scene_index": None if scene_index is None else int(scene_index),
             "label": label.strip() or None,
+            "boundary": bool(boundary),
         }
         return (chain + (item,),)
 
@@ -622,6 +636,7 @@ class MiniMaxH3GuideImagesToVideo:
                 "frame_index": 0,
                 "scene_index": scene_index,
                 "label": previous_end.get("label"),
+                "boundary": bool(previous_end.get("boundary", True)),
             }
             current_guides.insert(0, inherited)
 
@@ -682,6 +697,7 @@ class MiniMaxH3GuideImagesToVideo:
                     "frame_index": prefix_frames + visible_index,
                     "scene_index": item["scene_index"],
                     "label": item.get("label"),
+                    "boundary": bool(item.get("boundary", True)),
                 }
             )
 
