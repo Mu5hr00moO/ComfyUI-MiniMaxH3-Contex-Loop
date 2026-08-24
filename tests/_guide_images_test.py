@@ -124,16 +124,7 @@ def main() -> None:
         state_scene_2,
     )
 
-    resolved_scene_2 = module.MiniMaxH3GuideImagesToVideo._resolve_guides(
-        scene_2_guides,
-        124,
-    )
-
-    assert [index for index, _item in resolved_scene_2] == [0, 80, 123]
-    assert resolved_scene_2[0][1]["image"] is image_b
-    assert resolved_scene_2[1][1]["image"] is image_c
-    assert resolved_scene_2[2][1]["image"] is image_d
-
+    assert int(scene_2_guides[0]["frame_index"]) == module.INHERITED_START_FRAME_INDEX
     assert scene_2_guides[0]["image"] is image_b
 
     raw_scene_2_guides, prefix_frames = (
@@ -167,6 +158,48 @@ def main() -> None:
     assert [int(item["frame_index"]) for item in scene_1_guides] == [0, -1]
     assert scene_1_guides[0]["image"] is image_a
 
+    raw_no_end_chain = (
+        {"image": image_a, "frame_index": 0, "scene_index": 1},
+    )
+    scene_1_no_end_guides = (
+        module.MiniMaxH3GuideImagesToVideo._select_scene_guides(
+            raw_no_end_chain,
+            state_scene_1,
+        )
+    )
+    assert [int(item["frame_index"]) for item in scene_1_no_end_guides] == [0]
+
+    scene_2_no_end_guides = (
+        module.MiniMaxH3GuideImagesToVideo._select_scene_guides(
+            raw_no_end_chain,
+            state_scene_2,
+        )
+    )
+    assert scene_2_no_end_guides == ()
+
+    explicit_scene_2_start_chain = (
+        {"image": image_a, "frame_index": 0, "scene_index": 1},
+        {"image": image_c, "frame_index": 0, "scene_index": 2},
+    )
+    explicit_scene_2_guides = (
+        module.MiniMaxH3GuideImagesToVideo._select_scene_guides(
+            explicit_scene_2_start_chain,
+            state_scene_2,
+        )
+    )
+    assert [int(item["frame_index"]) for item in explicit_scene_2_guides] == [0]
+    raw_explicit_scene_2_guides, explicit_prefix_frames = (
+        module.MiniMaxH3GuideImagesToVideo._map_visible_guides_to_raw(
+            explicit_scene_2_guides,
+            state_scene_2,
+            124,
+        )
+    )
+    assert explicit_prefix_frames == 22
+    assert [
+        int(item["frame_index"]) for item in raw_explicit_scene_2_guides
+    ] == [22]
+
     _assert_raises(
         ValueError,
         lambda: module.MiniMaxH3GuideImagesToVideo._select_scene_guides(
@@ -177,14 +210,29 @@ def main() -> None:
             state_scene_1,
         ),
     )
+
     _assert_raises(
         ValueError,
         lambda: module.MiniMaxH3GuideImagesToVideo._select_scene_guides(
             (
-                {"image": image_a, "frame_index": 0, "scene_index": 1},
-                {"image": image_c, "frame_index": 80, "scene_index": 2},
+                {"image": image_a, "frame_index": -2, "scene_index": 1},
             ),
-            state_scene_2,
+            state_scene_1,
+        ),
+    )
+
+    state_scene_2_guide = {
+        "index": 2,
+        "plan": {
+            "compatibility": {"continuation_mode": "guide"},
+            "shots": state_scene_2["plan"]["shots"],
+        },
+    }
+    _assert_raises(
+        ValueError,
+        lambda: module.MiniMaxH3GuideImagesToVideo._select_scene_guides(
+            scene_chain,
+            state_scene_2_guide,
         ),
     )
     _assert_raises(
@@ -287,7 +335,7 @@ def main() -> None:
 
     verbose_output = stream.getvalue()
     assert "[MiniMaxH3GuideImages] scene 2: raw_frames=124, delivered_frames=102, prefix_frames=22" in verbose_output
-    assert "mapped guide 'scene1_end' visible 0 -> raw 22" in verbose_output
+    assert "mapped guide 'scene1_end' visible -2 -> raw 22" in verbose_output
     assert "mapped guide 'scene2_end' visible -1 -> raw 123" in verbose_output
     assert (
         "inherited start guide 'scene1_end' kept as prompt image and anchored "
@@ -339,6 +387,50 @@ def main() -> None:
         int(item["resolved_frame_index"]) for item in captured["keyframes"]
     ] == [123]
 
+    captured.clear()
+    no_inherited_clip = FakeClip()
+    node.execute(
+        clip=no_inherited_clip,
+        vae=FakeVAE(),
+        prompt="raw continuation only",
+        width=544,
+        height=960,
+        length=124,
+        state=state_scene_2,
+        verbose=True,
+        guide_images=(
+            {
+                "image": FakeImage(),
+                "frame_index": 0,
+                "scene_index": 1,
+                "label": "scene1_start",
+            },
+        ),
+    )
+    assert no_inherited_clip.images == []
+    assert "keyframes" not in captured
+
+    captured.clear()
+    explicit_start_clip = FakeClip()
+    node.execute(
+        clip=explicit_start_clip,
+        vae=FakeVAE(),
+        prompt="explicit scene start",
+        width=544,
+        height=960,
+        length=124,
+        state=state_scene_2,
+        verbose=True,
+        guide_images=(
+            {"image": FakeImage(), "frame_index": 0, "scene_index": 1},
+            {"image": FakeImage(), "frame_index": 0, "scene_index": 2},
+        ),
+    )
+    assert len(explicit_start_clip.images or []) == 1
+    assert [
+        int(item["resolved_frame_index"]) for item in captured["keyframes"]
+    ] == [22]
+
     input_types = module.MiniMaxH3GuideImagesToVideo.INPUT_TYPES()
     assert "state" not in input_types["required"]
     assert "state" in input_types["optional"]
@@ -370,7 +462,7 @@ def main() -> None:
 
     print(
         "guide images: frame-grid alignment, chaining, scene-local selection, "
-        "visible-to-raw mapping, and node mappings pass"
+        "optional raw-guide inheritance, visible-to-raw mapping, and node mappings pass"
     )
 
 
