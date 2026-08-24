@@ -75,6 +75,15 @@ def main() -> None:
     builder = module.MiniMaxH3GuideImage()
     first = builder.build(image_a, 80, scene_index=1)[0]
     chain = builder.build(image_b, -1, first, scene_index=2)[0]
+    assert chain[0]["boundary"] is True
+
+    no_boundary_built = builder.build(
+        image_b,
+        -1,
+        scene_index=1,
+        boundary=False,
+    )[0]
+    assert no_boundary_built[0]["boundary"] is False
 
     assert len(chain) == 2
     assert chain[0]["scene_index"] == 1
@@ -289,6 +298,46 @@ def main() -> None:
         int(item["resolved_frame_index"]) for item in captured["keyframes"]
     ] == [21, 123]
     assert captured["keyframes"][0][module.PRESERVED_PREFIX_BOUNDARY_KEY] is True
+    captured.clear()
+    no_boundary_chain = (
+        {
+            "image": FakeImage(),
+            "frame_index": 0,
+            "scene_index": 1,
+            "label": "scene1_start",
+        },
+        {
+            "image": FakeImage(),
+            "frame_index": -1,
+            "scene_index": 1,
+            "label": "scene1_end",
+            "boundary": False,
+        },
+        {
+            "image": FakeImage(),
+            "frame_index": -1,
+            "scene_index": 2,
+            "label": "scene2_end",
+        },
+    )
+
+    no_boundary_clip = FakeClip()
+    node.execute(
+        clip=no_boundary_clip,
+        vae=FakeVAE(),
+        prompt="test",
+        width=544,
+        height=960,
+        length=124,
+        state=state_scene_2,
+        verbose=True,
+        guide_images=no_boundary_chain,
+    )
+
+    assert len(no_boundary_clip.images or []) == 2
+    assert [
+        int(item["resolved_frame_index"]) for item in captured["keyframes"]
+    ] == [123]
 
     input_types = module.MiniMaxH3GuideImagesToVideo.INPUT_TYPES()
     assert "state" not in input_types["required"]
