@@ -5,8 +5,8 @@ When H3 Chain state is connected, guides become scene-local:
 
 - every guide must set scene_index
 - scene 1 requires an explicit visible frame 0
-- scene N inherits scene N-1 frame -1 as its visible start (frame 0)
-- every non-final scene requires a visible frame -1
+- scene N inherits scene N-1 frame -1 as its visible start when one exists
+- raw_guide may omit that image and continue from the preserved raw latent alone
 - visible indices map onto the raw H3 timeline after the preserved prefix
 - raw_guide keeps that inherited start as a keyframe on the last
   preserved raw frame when its boundary option is enabled
@@ -32,6 +32,9 @@ STATE_TYPE: Final[str] = "H3_CHAIN_STATE"
 LOG_PREFIX: Final[str] = "[MiniMaxH3GuideImages]"
 # Must stay identical to masked_context.PRESERVED_PREFIX_BOUNDARY_KEY.
 PRESERVED_PREFIX_BOUNDARY_KEY: Final[str] = "_preserved_prefix_boundary"
+# Scene-aware user input rejects values below -1. This sentinel is injected
+# only after that validation to preserve inherited-start provenance.
+INHERITED_START_FRAME_INDEX: Final[int] = -2
 
 
 class GuideImageSpec(TypedDict):
@@ -214,8 +217,9 @@ class MiniMaxH3GuideImage:
                         "step": 1,
                         "tooltip": (
                             "One-based scene number. Required when Guide "
-                            "Images to Video receives H3 Chain state. Scene N "
-                            "inherits scene N-1 frame -1 as visible frame 0."
+                            "Images to Video receives H3 Chain state. When the "
+                            "previous scene provides frame -1, scene N inherits "
+                            "it as visible frame 0."
                         ),
                     },
                 ),
@@ -260,9 +264,9 @@ class MiniMaxH3GuideImage:
     DESCRIPTION: str = (
         "Add one MiniMax H3 guide image at a chosen frame index. Chain several "
         "nodes through guide_images. With H3 Chain state, set scene_index: "
-        "scene 1 needs visible frame 0, later scenes inherit the previous "
-        "scene's frame -1 as their start, and every non-final scene needs "
-        "frame -1."
+        "scene 1 needs visible frame 0. raw_guide inherits the previous "
+        "scene's frame -1 when present, but may continue from the preserved "
+        "raw latent without an inherited image."
     )
 
     def build(
@@ -420,6 +424,7 @@ class MiniMaxH3GuideImagesToVideo:
             f"height={height}, requested_length={length}, raw_frames={frame_count}",
         )
 
+        inherited_start_raw_index: int | None = None
         if state is None:
             raw_scene_guides: GuideImageChain = tuple(guide_images or ())
             visible_start_raw_index: int = 0
@@ -427,6 +432,10 @@ class MiniMaxH3GuideImagesToVideo:
             scene_guides: GuideImageChain = self._select_scene_guides(
                 guide_images or (),
                 state,
+            )
+            has_inherited_start: bool = any(
+                int(item["frame_index"]) == INHERITED_START_FRAME_INDEX
+                for item in scene_guides
             )
             _log(
                 verbose,
@@ -443,6 +452,9 @@ class MiniMaxH3GuideImagesToVideo:
                 state,
                 frame_count,
             )
+            if has_inherited_start:
+                inherited_start_raw_index = visible_start_raw_index
+
             shot: dict[str, Any] = state["plan"]["shots"][scene_index - 1]
             continuation_mode: str = str(
                 shot.get(
@@ -496,7 +508,8 @@ class MiniMaxH3GuideImagesToVideo:
             inherited_start: bool = (
                 state is not None
                 and scene_index > 1
-                and resolved_index == visible_start_raw_index
+                and inherited_start_raw_index is not None
+                and resolved_index == inherited_start_raw_index
             )
             if inherited_start:
                 keyframe = _inherited_start_keyframe(
@@ -570,6 +583,22 @@ class MiniMaxH3GuideImagesToVideo:
                 f"the plan's 1..{scene_count} range."
             )
 
+        shot: dict[str, Any] = shots[scene_index - 1]
+        continuation_mode: str = str(
+            shot.get(
+                "continuation_mode",
+                state["plan"].get("compatibility", {}).get(
+                    "continuation_mode", "guide"
+                ),
+            )
+        )
+
+        if continuation_mode != "raw_guide":
+            raise ValueError(
+                "Scene-aware MiniMax H3 Guide Images to Video supports "
+                f"only raw_guide continuation mode, got {continuation_mode!r}."
+            )
+
         current_guides: list[GuideImageSpec] = []
         previous_end: GuideImageSpec | None = None
         used_keys: set[tuple[int, int]] = set()
@@ -617,13 +646,7 @@ class MiniMaxH3GuideImagesToVideo:
         if scene_index == 1:
             if not any(int(item["frame_index"]) == 0 for item in current_guides):
                 raise ValueError("Scene 1 requires an explicit guide at frame 0.")
-        else:
-            if previous_end is None:
-                raise ValueError(
-                    f"Scene {scene_index} requires the frame -1 guide from "
-                    f"scene {scene_index - 1} as its inherited start."
-                )
-
+        elif previous_end is not None:
             if any(int(item["frame_index"]) == 0 for item in current_guides):
                 raise ValueError(
                     f"Scene {scene_index} defines an explicit frame 0 guide, "
@@ -633,21 +656,12 @@ class MiniMaxH3GuideImagesToVideo:
 
             inherited: GuideImageSpec = {
                 "image": previous_end["image"],
-                "frame_index": 0,
+                "frame_index": INHERITED_START_FRAME_INDEX,
                 "scene_index": scene_index,
                 "label": previous_end.get("label"),
                 "boundary": bool(previous_end.get("boundary", True)),
             }
             current_guides.insert(0, inherited)
-
-        if (
-            scene_index < scene_count
-            and not any(int(item["frame_index"]) == -1 for item in current_guides)
-        ):
-            raise ValueError(
-                f"Scene {scene_index} requires a guide at frame -1 because "
-                "another scene follows it."
-            )
 
         return tuple(current_guides)
 
@@ -681,9 +695,12 @@ class MiniMaxH3GuideImagesToVideo:
 
         for item in guide_images:
             frame_index: int = int(item["frame_index"])
-            visible_index: int = (
-                delivered_frames - 1 if frame_index == -1 else frame_index
-            )
+            if frame_index == INHERITED_START_FRAME_INDEX:
+                visible_index: int = 0
+            elif frame_index == -1:
+                visible_index = delivered_frames - 1
+            else:
+                visible_index = frame_index
 
             if visible_index < 0 or visible_index >= delivered_frames:
                 raise ValueError(
